@@ -1,0 +1,261 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { FileText, Eye, AlertCircle } from 'lucide-react'
+import axios from 'axios'
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+
+interface ResumeViewerProps {
+  resumeId: number
+  scoreData: any
+}
+
+export function ResumeViewer({ resumeId, scoreData }: ResumeViewerProps) {
+  const [parsedData, setParsedData] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string>('')
+
+  useEffect(() => {
+    fetchParsedData()
+  }, [resumeId])
+
+  const fetchParsedData = async () => {
+    try {
+      setLoading(true)
+      const response = await axios.get(`${API_URL}/api/resume/${resumeId}/parsed`)
+      setParsedData(response.data.parsed_data)
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to load parsed resume')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
+        <div className="flex items-center justify-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="bg-white rounded-xl shadow-sm border border-red-200 p-8">
+        <div className="flex items-center text-red-600">
+          <AlertCircle className="h-5 w-5 mr-2" />
+          <span>{error}</span>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold text-gray-900 flex items-center">
+          <Eye className="h-7 w-7 mr-2 text-primary-600" />
+          Resume Comparison
+        </h2>
+      </div>
+
+      <div className="grid lg:grid-cols-2 gap-6">
+        {/* Original Format */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="bg-gradient-to-r from-primary-600 to-primary-700 px-6 py-4">
+            <h3 className="text-lg font-semibold text-white flex items-center">
+              <FileText className="h-5 w-5 mr-2" />
+              Original Resume
+            </h3>
+          </div>
+          <div className="p-6 h-[600px] overflow-y-auto scrollbar-hide">
+            <div className="prose prose-sm max-w-none">
+              {parsedData?.raw_text ? (
+                <pre className="whitespace-pre-wrap text-sm font-mono text-gray-700">
+                  {parsedData.raw_text}
+                </pre>
+              ) : (
+                <p className="text-gray-500">Original text not available</p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ATS View */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="bg-gradient-to-r from-green-600 to-green-700 px-6 py-4">
+            <h3 className="text-lg font-semibold text-white flex items-center">
+              <Eye className="h-5 w-5 mr-2" />
+              ATS View
+            </h3>
+          </div>
+          <div className="p-6 h-[600px] overflow-y-auto scrollbar-hide">
+            <div className="space-y-6">
+              {/* Name */}
+              {parsedData?.name && (
+                <div>
+                  <div className="text-2xl font-bold text-gray-900">{parsedData.name}</div>
+                </div>
+              )}
+
+              {/* Contact */}
+              {(parsedData?.contact_info?.email || parsedData?.contact_info?.phone || parsedData?.email || parsedData?.phone) && (
+                <div className="flex flex-wrap gap-4 text-sm text-gray-600">
+                  {(parsedData.contact_info?.email || parsedData.email) && (
+                    <span>📧 {parsedData.contact_info?.email || parsedData.email}</span>
+                  )}
+                  {(parsedData.contact_info?.phone || parsedData.phone) && (
+                    <span>📞 {parsedData.contact_info?.phone || parsedData.phone}</span>
+                  )}
+                  {(parsedData.contact_info?.linkedin || parsedData.linkedin) && (
+                    <span>💼 {parsedData.contact_info?.linkedin || parsedData.linkedin}</span>
+                  )}
+                  {(parsedData.contact_info?.location || parsedData.location) && (
+                    <span>📍 {parsedData.contact_info?.location || parsedData.location}</span>
+                  )}
+                </div>
+              )}
+
+              {/* Summary */}
+              {parsedData?.summary && (
+                <div>
+                  <h4 className="text-lg font-semibold text-gray-900 mb-2">SUMMARY</h4>
+                  <p className="text-gray-700">{parsedData.summary}</p>
+                </div>
+              )}
+
+              {/* Skills */}
+              {parsedData?.skills && parsedData.skills.length > 0 && (
+                <div>
+                  <h4 className="text-lg font-semibold text-gray-900 mb-2">SKILLS</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {parsedData.skills.map((skill: string, idx: number) => (
+                      <span
+                        key={idx}
+                        className="px-3 py-1 bg-primary-100 text-primary-700 rounded-full text-sm"
+                      >
+                        {skill}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Experience */}
+              {parsedData?.experience && parsedData.experience.length > 0 && (
+                <div>
+                  <h4 className="text-lg font-semibold text-gray-900 mb-3">EXPERIENCE</h4>
+                  <div className="space-y-4">
+                    {parsedData.experience.map((exp: any, idx: number) => (
+                      <div key={idx} className="border-l-2 border-primary-300 pl-4">
+                        <div className="font-semibold text-gray-900">
+                          {exp.title || 'Position'}
+                        </div>
+                        {exp.company && (
+                          <div className="text-sm text-gray-600">{exp.company}</div>
+                        )}
+                        {exp.dates && (
+                          <div className="text-sm text-gray-500">{exp.dates}</div>
+                        )}
+                        {exp.location && (
+                          <div className="text-sm text-gray-500">{exp.location}</div>
+                        )}
+                        {exp.description && (
+                          <p className="text-sm text-gray-600 mt-1">{exp.description}</p>
+                        )}
+                        {exp.bullets && exp.bullets.length > 0 && (
+                          <ul className="mt-2 space-y-1">
+                            {exp.bullets.map((bullet: string, bidx: number) => (
+                              <li key={bidx} className="text-sm text-gray-600">• {bullet}</li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Education */}
+              {parsedData?.education && parsedData.education.length > 0 && (
+                <div>
+                  <h4 className="text-lg font-semibold text-gray-900 mb-3">EDUCATION</h4>
+                  <div className="space-y-3">
+                    {parsedData.education.map((edu: any, idx: number) => (
+                      <div key={idx}>
+                        <div className="font-semibold text-gray-900">
+                          {edu.degree || 'Degree'}
+                        </div>
+                        {edu.institution && (
+                          <div className="text-sm text-gray-600">{edu.institution}</div>
+                        )}
+                        {edu.graduation_date && (
+                          <div className="text-sm text-gray-500">{edu.graduation_date}</div>
+                        )}
+                        {edu.gpa && (
+                          <div className="text-sm text-gray-500">GPA: {edu.gpa}</div>
+                        )}
+                        {edu.major && (
+                          <div className="text-sm text-gray-600">Major: {edu.major}</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Certifications */}
+              {parsedData?.certifications && parsedData.certifications.length > 0 && (
+                <div>
+                  <h4 className="text-lg font-semibold text-gray-900 mb-3">CERTIFICATIONS</h4>
+                  <ul className="space-y-2">
+                    {parsedData.certifications.map((cert: any, idx: number) => (
+                      <li key={idx} className="text-gray-700">
+                        • {typeof cert === 'string' ? cert : cert.name || 'Unknown Certification'}
+                        {cert.issuer && <span className="text-gray-500 text-sm ml-2">({cert.issuer})</span>}
+                        {cert.date && <span className="text-gray-500 text-sm ml-2">- {cert.date}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Issues Callout */}
+      {scoreData?.issues && scoreData.issues.length > 0 && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6">
+          <h3 className="text-lg font-semibold text-yellow-900 mb-4 flex items-center">
+            <AlertCircle className="h-5 w-5 mr-2" />
+            Issues Detected
+          </h3>
+          <div className="space-y-2">
+            {scoreData.issues.map((issue: any, idx: number) => (
+              <div
+                key={idx}
+                className={`flex items-start p-3 rounded-lg ${
+                  issue.severity === 'critical'
+                    ? 'bg-red-100 text-red-900'
+                    : issue.severity === 'high'
+                    ? 'bg-orange-100 text-orange-900'
+                    : 'bg-yellow-100 text-yellow-900'
+                }`}
+              >
+                <span className="font-medium mr-2">
+                  {issue.severity === 'critical' ? '🔴' : issue.severity === 'high' ? '🟠' : '🟡'}
+                </span>
+                <span className="flex-1">{issue.message}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
