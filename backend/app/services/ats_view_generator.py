@@ -116,7 +116,7 @@ class ATSViewGenerator:
             complexity = "moderate"
         else:
             complexity = "complex"
-            warnings.append("Complex layout with multiple fonts may reduce ATS accuracy")
+            # Note: Multiple fonts warning removed - not always applicable
         
         # Check for headers/footers (heuristic: text in top/bottom 10% of page)
         has_headers_footers = self._detect_headers_footers(doc)

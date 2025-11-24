@@ -9,6 +9,7 @@ from app.database import get_db
 from app.schemas import (
     ResumeUploadResponse, ResumeScore, RoleMatchResponse,
     ResumeSummary, SectionAnalysisRequest, SectionAnalysisResponse,
+    LLMDiagnosticRequest, LLMDiagnosticResponse,
     # TODO: Re-enable for later development
     # SkillSuggestionRequest, SkillSuggestionResponse
 )
@@ -18,6 +19,8 @@ from app.services.parser import ResumeParser, get_resume_parser
 from app.services.scorer import ResumeScorer
 from app.services.role_matcher import RoleMatcher
 from app.services.section_analyzer import SectionAnalyzer
+from app.services.llm_diagnostic import LLMDiagnostic, prepare_diagnostic_data
+from app.services.ats_issue_detector import ATSIssueDetector
 # TODO: Re-enable for later development
 # from app.services.skill_suggester import SkillSuggester
 
@@ -79,7 +82,7 @@ async def parse_resume(
     
     # Parse resume in background
     if background_tasks:
-        background_tasks.add_task(parse_resume_task, resume.id, file_path, file_ext, db)
+        background_tasks.add_task(parse_resume_task, resume.id, file_path, file_ext)
     
     return ResumeUploadResponse(
         id=resume.id,
@@ -90,16 +93,26 @@ async def parse_resume(
     )
 
 
-def parse_resume_task(resume_id: int, file_path: str, file_type: str, db: Session):
+def parse_resume_task(resume_id: int, file_path: str, file_type: str):
     """Background task to parse resume"""
-    parser = ResumeParser()
-    parsed_data = parser.parse(file_path, file_type)
+    from app.database import SessionLocal
     
-    # Update resume with parsed data
-    resume = db.query(Resume).filter(Resume.id == resume_id).first()
-    if resume:
-        resume.parsed_data = parsed_data
-        db.commit()
+    # Create a new database session for this background task
+    db = SessionLocal()
+    try:
+        parser = ResumeParser()
+        parsed_data = parser.parse(file_path, file_type)
+        
+        # Update resume with parsed data
+        resume = db.query(Resume).filter(Resume.id == resume_id).first()
+        if resume:
+            resume.parsed_data = parsed_data
+            db.commit()
+    except Exception as e:
+        print(f"Error parsing resume {resume_id}: {str(e)}")
+        db.rollback()
+    finally:
+        db.close()
 
 
 @router.get("/resume/{resume_id}/parsed")
@@ -164,11 +177,8 @@ async def score_resume(resume_id: int, db: Session = Depends(get_db)):
     resume.score_details = score_result
     db.commit()
     
-    return ResumeScore(
-        resume_id=resume.id,
-        ats_score=score_result,
-        ats_text=score_result["ats_text"]
-    )
+    # Return the score result directly (ResumeScore = ATSScore)
+    return score_result
 
 
 @router.get("/roles/{resume_id}", response_model=RoleMatchResponse)
@@ -303,4 +313,39 @@ async def analyze_section(request: SectionAnalysisRequest, db: Session = Depends
     )
     
     return analysis
+
+
+@router.post("/llm-diagnostic", response_model=LLMDiagnosticResponse)
+async def llm_diagnostic(request: LLMDiagnosticRequest, db: Session = Depends(get_db)):
+    """
+    Get AI-powered explanation for ATS issues based on user's observation.
+    User describes what they see wrong, LLM explains why and how to fix.
+    """
+    resume = db.query(Resume).filter(Resume.id == request.resume_id).first()
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    
+    if not resume.parsed_data:
+        raise HTTPException(status_code=400, detail="Resume must be parsed first")
+    
+    # Get file path
+    file_path = resume.file_path
+    
+    # Extract blocks for analysis
+    detector = ATSIssueDetector()
+    blocks = detector._extract_blocks_with_metadata(file_path)
+    
+    # Prepare condensed diagnostic data
+    diagnostic_data = prepare_diagnostic_data(resume.parsed_data, blocks)
+    
+    # Get LLM explanation (issues already detected by rules)
+    llm = LLMDiagnostic()
+    result = llm.explain_issues(
+        user_prompt=request.user_prompt,
+        ats_extracted=diagnostic_data['ats_extracted'],
+        detected_issues=diagnostic_data['detected_issues'],
+        block_summaries=diagnostic_data['block_summaries']
+    )
+    
+    return result
 

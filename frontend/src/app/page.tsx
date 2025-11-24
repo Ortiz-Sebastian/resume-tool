@@ -7,7 +7,8 @@ import { ScoreCard } from '@/components/ScoreCard'
 import { RoleMatches } from '@/components/RoleMatches'
 import { PDFHighlightViewer } from '@/components/PDFHighlightViewer'
 import { IssueSummaryPanel } from '@/components/IssueSummaryPanel'
-import { SectionSummary } from '@/components/SectionSummary'
+import { QuickRecommendations } from '@/components/QuickRecommendations'
+import { ATSDiagnostic } from '@/components/ATSDiagnostic'
 // TODO: Re-enable for later development
 // import { SkillSuggestions } from '@/components/SkillSuggestions'
 import { FileText, Target, Lightbulb, Upload } from 'lucide-react'
@@ -25,6 +26,8 @@ export default function Home() {
   }
 
   const handleScoreReceived = (data: any) => {
+    console.log('Score data received:', data)
+    console.log('Recommendations:', data?.recommendations)
     setScoreData(data)
   }
 
@@ -144,55 +147,58 @@ export default function Home() {
 
         {activeTab === 'analyze' && resumeId && (
           <div className="space-y-8">
-            {/* Section Summary - NEW! */}
-            <div>
-              <h2 className="text-2xl font-bold text-gray-900 mb-4">
-                📊 ATS Extraction Summary
-              </h2>
-              <p className="text-gray-600 mb-6">
-                Compare what's in your resume vs. what the ATS extracted. Click sections to see why extraction failed.
-              </p>
-              <SectionSummary
-                resumeId={resumeId}
-                onSectionAnalyzed={handleSectionAnalyzed}
-              />
-            </div>
-
-            {/* Score Overview */}
-            <ScoreCard
-              resumeId={resumeId}
-              onScoreReceived={handleScoreReceived}
-            />
-
-            {/* ATS Highlighting Section */}
-            {scoreData?.highlights && scoreData.highlights.length > 0 && (
-              <div className="grid lg:grid-cols-3 gap-6">
-                {/* PDF with Highlights (2 columns) */}
-                <div className="lg:col-span-2">
-                  <PDFHighlightViewer
-                    pdfUrl={`http://localhost:8000/api/resume/${resumeId}/file`}
-                    highlights={scoreData.highlights}
-                    resumeId={resumeId}
-                  />
-                </div>
-
-                {/* Issue Summary Panel (1 column) */}
-                <div className="lg:col-span-1">
-                  <IssueSummaryPanel
-                    summary={scoreData.issue_summary}
-                    suggestions={scoreData.suggestions || []}
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* Side by Side Viewer */}
+            {/* 1. Side by Side Viewer - Compare original vs ATS */}
             <ResumeViewer
               resumeId={resumeId}
               scoreData={scoreData}
             />
 
-            {/* Role Matches */}
+            {/* 2. Visual Issue Detection - PDF with highlights + Issue breakdown */}
+            {scoreData?.highlights && scoreData.highlights.length > 0 && (
+              <div className="space-y-6">
+                {/* Grid: PDF (2 cols) + Issue Summary (1 col) */}
+                <div className="grid lg:grid-cols-3 gap-6">
+                  {/* PDF with color-coded highlights (2 columns) */}
+                  <div className="lg:col-span-2">
+                    <PDFHighlightViewer
+                      pdfUrl={`http://localhost:8000/api/resume/${resumeId}/file`}
+                      highlights={scoreData.highlights}
+                      resumeId={resumeId}
+                    />
+                  </div>
+
+                  {/* Right sidebar: Issue Summary (1 column) */}
+                  <div className="lg:col-span-1">
+                    <IssueSummaryPanel
+                      summary={scoreData.issue_summary}
+                      suggestions={[]}
+                      issues={scoreData.issues || []}
+                    />
+                  </div>
+                </div>
+
+                {/* 3. TIER 1: Quick Fixes - Below the entire row */}
+                {scoreData?.recommendations && scoreData.recommendations.length > 0 && (
+                  <QuickRecommendations
+                    recommendations={scoreData.recommendations}
+                    issueCount={scoreData.issue_summary?.total_issues || 0}
+                  />
+                )}
+              </div>
+            )}
+
+            {/* Hidden: Score Overview - Trigger scoring but don't display */}
+            <div className="hidden">
+              <ScoreCard
+                resumeId={resumeId}
+                onScoreReceived={handleScoreReceived}
+              />
+            </div>
+
+            {/* 4. TIER 2: AI Diagnostic - Detailed, on-demand analysis */}
+            <ATSDiagnostic resumeId={resumeId} />
+
+            {/* 5. Role Matches */}
             <RoleMatches
               resumeId={resumeId}
               onMatchesReceived={handleRoleMatchesReceived}

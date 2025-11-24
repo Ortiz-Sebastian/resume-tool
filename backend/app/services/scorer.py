@@ -56,25 +56,17 @@ class ResumeScorer:
             readability_score * self.weights["readability"]
         )
         
-        # Generate issues and suggestions using diagnostics
-        issues = self._identify_issues(parsed_data, ats_diagnostics, {
-            "formatting": formatting_score,
-            "keywords": keyword_score,
-            "structure": structure_score,
-            "readability": readability_score
-        })
-        
-        suggestions = self._generate_suggestions(issues)
-        
-        # Detect visual formatting issues and generate highlights
+        # ALL issue detection now happens in ats_issue_detector.py (single source of truth)
         issue_detection = self.issue_detector.detect_issues(
             file_path,
             file_type,
-            parsed_data
+            parsed_data,
+            ats_diagnostics  # Pass diagnostics for comprehensive detection
         )
         
-        # Combine text-based recommendations with visual recommendations
-        all_recommendations = list(set(suggestions + issue_detection["recommendations"]))
+        # Extract issues and recommendations from the unified detector
+        issues = issue_detection.get("issues", [])
+        recommendations = issue_detection.get("recommendations", [])
         
         return {
             "overall_score": round(overall_score, 2),
@@ -83,8 +75,9 @@ class ResumeScorer:
             "structure_score": round(structure_score, 2),
             "readability_score": round(readability_score, 2),
             "ats_text": ats_text,
-            "issues": issues,
-            "suggestions": all_recommendations,
+            "issues": issues,  # From unified detector
+            "suggestions": recommendations,  # Legacy field
+            "recommendations": recommendations,  # Tier 1: Quick fixes
             "highlights": issue_detection["highlights"],
             "issue_summary": issue_detection["summary"]
         }
@@ -191,169 +184,5 @@ class ResumeScorer:
         
         return max(0, score)
     
-    def _identify_issues(
-        self, 
-        parsed_data: Dict[str, Any], 
-        ats_diagnostics: Dict[str, Any],
-        scores: Dict[str, float]
-    ) -> List[Dict[str, Any]]:
-        """
-        Identify specific issues using data from hybrid parser.
-        
-        Leverages diagnostics from ATSViewGenerator to provide specific,
-        actionable feedback based on actual layout analysis.
-        """
-        issues = []
-        
-        # Use specific diagnostics from ATSViewGenerator
-        if ats_diagnostics:
-            # Images issue
-            if ats_diagnostics.get("has_images"):
-                issues.append({
-                    "category": "formatting",
-                    "severity": "high",
-                    "message": "Resume contains images that ATS systems cannot read",
-                    "detail": "Images, logos, and graphics are invisible to ATS"
-                })
-            
-            # Tables issue
-            if ats_diagnostics.get("has_tables"):
-                issues.append({
-                    "category": "formatting",
-                    "severity": "medium",
-                    "message": "Resume uses tables which may confuse ATS parsing",
-                    "detail": "Tables can cause content to be read in wrong order"
-                })
-            
-            # Headers/footers issue
-            if ats_diagnostics.get("has_headers_footers"):
-                issues.append({
-                    "category": "formatting",
-                    "severity": "medium",
-                    "message": "Headers or footers detected - ATS may miss this content",
-                    "detail": "Contact info in headers/footers is often missed"
-                })
-            
-            # Complex layout issue
-            if ats_diagnostics.get("layout_complexity") == "complex":
-                issues.append({
-                    "category": "formatting",
-                    "severity": "high",
-                    "message": "Resume has complex layout that reduces ATS compatibility",
-                    "detail": f"Multiple fonts and complex formatting detected"
-                })
-            
-            # Include specific warnings from diagnostics
-            for warning in ats_diagnostics.get("warnings", []):
-                issues.append({
-                    "category": "formatting",
-                    "severity": "medium",
-                    "message": warning
-                })
-        
-        # Fallback: if diagnostics not available or formatting score is low
-        elif scores["formatting"] < 70:
-            issues.append({
-                "category": "formatting",
-                "severity": "high",
-                "message": "Resume may contain ATS-unfriendly formatting"
-            })
-        
-        # Missing contact info
-        if not parsed_data.get("email"):
-            issues.append({
-                "category": "structure",
-                "severity": "critical",
-                "message": "Email address is missing"
-            })
-        
-        # Missing skills
-        if not parsed_data.get("skills") or len(parsed_data.get("skills", [])) == 0:
-            issues.append({
-                "category": "keywords",
-                "severity": "high",
-                "message": "No skills section found"
-            })
-        
-        # Missing experience
-        if not parsed_data.get("experience") or len(parsed_data.get("experience", [])) == 0:
-            issues.append({
-                "category": "structure",
-                "severity": "high",
-                "message": "No work experience section found"
-            })
-        
-        # Short or missing summary
-        if not parsed_data.get("summary"):
-            issues.append({
-                "category": "readability",
-                "severity": "medium",
-                "message": "Professional summary is missing"
-            })
-        
-        return issues
-    
-    def _generate_suggestions(self, issues: List[Dict[str, Any]]) -> List[str]:
-        """
-        Generate actionable suggestions based on identified issues.
-        
-        Provides specific, actionable advice based on diagnostics from the hybrid parser.
-        """
-        suggestions = []
-        
-        for issue in issues:
-            # Image-related suggestions
-            if "images" in issue["message"].lower():
-                suggestions.append("Remove images, photos, and logos - use text-only formatting")
-            
-            # Table-related suggestions
-            elif "tables" in issue["message"].lower():
-                suggestions.append("Replace tables with simple text formatting using line breaks")
-            
-            # Headers/footers suggestions
-            elif "headers" in issue["message"].lower() or "footers" in issue["message"].lower():
-                suggestions.append("Move contact information from header/footer to main document body")
-            
-            # Complex layout suggestions
-            elif "complex layout" in issue["message"].lower():
-                suggestions.append("Simplify layout: use single column, standard fonts, and consistent formatting")
-            
-            # Contact info suggestions
-            elif "email" in issue["message"].lower():
-                suggestions.append("Add your email address prominently at the top of your resume")
-            elif "phone" in issue["message"].lower():
-                suggestions.append("Include your phone number in the contact section")
-            
-            # Skills suggestions
-            elif "skills" in issue["message"].lower():
-                suggestions.append("Add a dedicated Skills section with relevant technical and soft skills")
-            
-            # Experience suggestions
-            elif "experience" in issue["message"].lower():
-                suggestions.append("Add your work experience with job titles, companies, dates, and achievements")
-            
-            # Summary suggestions
-            elif "summary" in issue["message"].lower():
-                suggestions.append("Add a brief professional summary (2-3 sentences) highlighting your key qualifications")
-        
-        # Remove duplicates while preserving order
-        seen = set()
-        unique_suggestions = []
-        for suggestion in suggestions:
-            if suggestion not in seen:
-                seen.add(suggestion)
-                unique_suggestions.append(suggestion)
-        
-        # Add general suggestions if we have fewer than 3
-        if len(unique_suggestions) < 3:
-            general = [
-                "Use standard section headers (Experience, Education, Skills, Summary)",
-                "Include action verbs and quantifiable achievements in your experience",
-                "Tailor your resume keywords to match the job description"
-            ]
-            for gen in general:
-                if gen not in seen and len(unique_suggestions) < 5:
-                    unique_suggestions.append(gen)
-        
-        return unique_suggestions[:5]  # Limit to top 5 suggestions
+    # Note: Issue detection moved to ats_issue_detector.py (single source of truth)
 

@@ -24,8 +24,8 @@ export function ScoreCard({ resumeId, onScoreReceived }: ScoreCardProps) {
     try {
       setLoading(true)
       const response = await axios.post(`${API_URL}/api/score/${resumeId}`)
-      setScoreData(response.data.ats_score)
-      onScoreReceived(response.data.ats_score)
+      setScoreData(response.data)
+      onScoreReceived(response.data)
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to calculate score')
     } finally {
@@ -111,25 +111,7 @@ export function ScoreCard({ resumeId, onScoreReceived }: ScoreCardProps) {
         </div>
       </div>
 
-      {/* Suggestions */}
-      {scoreData.suggestions && scoreData.suggestions.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <h3 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
-            <CheckCircle className="h-6 w-6 mr-2 text-green-600" />
-            Recommendations
-          </h3>
-          <ul className="space-y-3">
-            {scoreData.suggestions.map((suggestion: string, idx: number) => (
-              <li key={idx} className="flex items-start">
-                <span className="flex-shrink-0 h-6 w-6 flex items-center justify-center bg-primary-100 text-primary-700 rounded-full text-sm font-semibold mr-3">
-                  {idx + 1}
-                </span>
-                <span className="text-gray-700 flex-1">{suggestion}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {/* Recommendations removed - now shown in QuickRecommendations (Tier 1) component */}
     </div>
   )
 }

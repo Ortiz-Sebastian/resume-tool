@@ -57,13 +57,14 @@ class ATSIssueSummary(BaseModel):
     low: int
 
 class ATSScore(BaseModel):
-    overall_score: int
-    formatting_score: int
-    keyword_score: int
-    structure_score: int
-    readability_score: int
+    overall_score: float  # Changed from int to float (scores can have decimals)
+    formatting_score: float  # Changed from int to float
+    keyword_score: float  # Changed from int to float
+    structure_score: float  # Changed from int to float
+    readability_score: float  # Changed from int to float
     issues: List[str]
     suggestions: List[str]
+    recommendations: List[str] = []  # Tier 1: Quick, rule-based recommendations
     ats_text: str
     highlights: List[ATSHighlight] = []
     issue_summary: Optional[ATSIssueSummary] = None
@@ -98,6 +99,16 @@ class SectionAnalysisResponse(BaseModel):
     recommendations: List[str]
     highlights: List[ATSHighlight]
     visual_location: Optional[Dict[str, Any]] = None  # Page, bbox of section
+
+# LLM Diagnostic schemas (NEW - User-prompted analysis)
+class LLMDiagnosticRequest(BaseModel):
+    resume_id: int
+    user_prompt: str  # e.g., "I'm missing 5 skills" or "My email isn't showing"
+
+class LLMDiagnosticResponse(BaseModel):
+    explanation: str  # Why this happened
+    location: Optional[str] = None  # Where to look (description)
+    recommendations: List[str]  # How to fix
 
 # Role Match schemas
 class RoleMatch(BaseModel):

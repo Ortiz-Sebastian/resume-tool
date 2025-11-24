@@ -226,35 +226,6 @@ export function ResumeViewer({ resumeId, scoreData }: ResumeViewerProps) {
           </div>
         </div>
       </div>
-
-      {/* Issues Callout */}
-      {scoreData?.issues && scoreData.issues.length > 0 && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6">
-          <h3 className="text-lg font-semibold text-yellow-900 mb-4 flex items-center">
-            <AlertCircle className="h-5 w-5 mr-2" />
-            Issues Detected
-          </h3>
-          <div className="space-y-2">
-            {scoreData.issues.map((issue: any, idx: number) => (
-              <div
-                key={idx}
-                className={`flex items-start p-3 rounded-lg ${
-                  issue.severity === 'critical'
-                    ? 'bg-red-100 text-red-900'
-                    : issue.severity === 'high'
-                    ? 'bg-orange-100 text-orange-900'
-                    : 'bg-yellow-100 text-yellow-900'
-                }`}
-              >
-                <span className="font-medium mr-2">
-                  {issue.severity === 'critical' ? '🔴' : issue.severity === 'high' ? '🟠' : '🟡'}
-                </span>
-                <span className="flex-1">{issue.message}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   )
 }

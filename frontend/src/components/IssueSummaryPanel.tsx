@@ -13,9 +13,10 @@ interface IssueSummary {
 interface IssueSummaryPanelProps {
   summary: IssueSummary
   suggestions: string[]
+  issues?: string[]  // List of actual issues detected
 }
 
-export function IssueSummaryPanel({ summary, suggestions }: IssueSummaryPanelProps) {
+export function IssueSummaryPanel({ summary, suggestions, issues = [] }: IssueSummaryPanelProps) {
   const { total_issues, critical, high, medium, low } = summary
 
   const getOverallStatus = () => {
@@ -150,6 +151,24 @@ export function IssueSummaryPanel({ summary, suggestions }: IssueSummaryPanelPro
         </div>
       )}
 
+      {/* Issues Detected - List of actual issues */}
+      {issues && issues.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <Info className="h-5 w-5 text-gray-600" />
+            <h4 className="text-md font-semibold text-gray-900">Issues Detected</h4>
+          </div>
+          <ul className="space-y-2">
+            {issues.map((issue, idx) => (
+              <li key={idx} className="flex items-start gap-3 text-sm text-gray-700 p-2 bg-yellow-50 rounded-lg border border-yellow-200">
+                <span className="text-yellow-600 font-bold mt-0.5">🟡</span>
+                <span className="flex-1">{issue}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Recommendations */}
       {suggestions && suggestions.length > 0 && (
         <div className="bg-gradient-to-br from-primary-50 to-white rounded-xl shadow-sm border border-primary-200 p-6">
@@ -177,11 +196,10 @@ export function IssueSummaryPanel({ summary, suggestions }: IssueSummaryPanelPro
               <strong className="text-gray-900">How to use this feedback:</strong>
             </p>
             <ol className="list-decimal list-inside space-y-1 ml-2">
-              <li>Review highlighted issues on your PDF above</li>
-              <li>Hover over colored boxes to see detailed explanations</li>
+              <li>Hover over colored boxes on the PDF to see detailed explanations</li>
+              <li>Click on boxes to see specific issue descriptions</li>
               <li>Fix critical and high priority issues first</li>
-              <li>Follow the recommendations to improve ATS compatibility</li>
-              <li>Re-upload your resume after making changes</li>
+              <li>Re-upload your resume after making changes to see improvement</li>
             </ol>
           </div>
         </div>
