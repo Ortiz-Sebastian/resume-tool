@@ -96,20 +96,20 @@ async def parse_resume(
 def parse_resume_task(resume_id: int, file_path: str, file_type: str):
     """Background task to parse resume"""
     from app.database import SessionLocal
+    import traceback
     
-    # Create a new database session for this background task
     db = SessionLocal()
     try:
         parser = ResumeParser()
         parsed_data = parser.parse(file_path, file_type)
         
-        # Update resume with parsed data
         resume = db.query(Resume).filter(Resume.id == resume_id).first()
         if resume:
             resume.parsed_data = parsed_data
             db.commit()
     except Exception as e:
         print(f"Error parsing resume {resume_id}: {str(e)}")
+        traceback.print_exc()
         db.rollback()
     finally:
         db.close()

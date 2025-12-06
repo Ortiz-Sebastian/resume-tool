@@ -105,10 +105,6 @@ class ResumeScorer:
             if ats_diagnostics.get("has_headers_footers"):
                 score -= 5
             
-            # Penalize for text boxes (separate layers confuse ATS)
-            if ats_diagnostics.get("has_text_boxes"):
-                score -= 10
-            
             # Penalize based on layout complexity
             complexity = ats_diagnostics.get("layout_complexity", "simple")
             if complexity == "complex":

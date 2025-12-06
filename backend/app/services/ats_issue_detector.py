@@ -96,10 +96,7 @@ class ATSIssueDetector:
         # 6. Images
         issues.extend(self._detect_images(file_path))
         
-        # 7. Floating text boxes
-        issues.extend(self._detect_floating_text_boxes(blocks))
-        
-        # 8. Icons
+        # 7. Icons
         issues.extend(self._detect_icons(file_path, parsed_data))
         
         # 9. Date format issues
@@ -141,29 +138,58 @@ class ATSIssueDetector:
                 bbox=None  # Document-wide
             ))
         
-        # Headers/footers issue
+        # Headers/footers issue (only flagged when truly detected)
         if ats_diagnostics.get("has_headers_footers"):
             issues.append(ATSIssue(
                 code="has_headers_footers",
                 severity=IssueSeverity.MEDIUM,
                 section=IssueSection.CONTACT,
-                message="Headers or footers detected - ATS may miss this content",
-                details="Contact info in headers/footers is often missed by ATS. Move to main body.",
+                message="Page headers or footers detected - ATS may skip this content",
+                details="Content in page margins (headers/footers) is often ignored by ATS systems. If this contains important info like contact details or page numbers, consider moving it to the main body or removing it.",
                 page=1,
                 bbox=None  # Document-wide
             ))
         
-        # Complex layout issue
-        if ats_diagnostics.get("layout_complexity") == "complex":
-            issues.append(ATSIssue(
-                code="complex_layout",
-                severity=IssueSeverity.HIGH,
-                section=IssueSection.GENERAL,
-                message="Resume has complex layout that reduces ATS compatibility",
-                details="Complex formatting detected (tables, images, or multi-column layout). Simplify to single-column with standard formatting.",
-                page=1,
-                bbox=None  # Document-wide
-            ))
+        # Complexity-based issues (using new metrics system)
+        complexity_metric = ats_diagnostics.get("complexity_metric")
+        if complexity_metric:
+            score = complexity_metric.get("score", 0)
+            factors = complexity_metric.get("contributing_factors", [])
+            factors_str = "; ".join(factors) if factors else "Multiple formatting issues detected"
+            
+            if score > 70:
+                # Very complex - CRITICAL
+                issues.append(ATSIssue(
+                    code="very_complex_layout",
+                    severity=IssueSeverity.CRITICAL,
+                    section=IssueSection.GENERAL,
+                    message="Resume has very complex layout",
+                    details=f"Your resume will likely fail ATS parsing. Issues found: {factors_str}. Recommendation: Simplify to single-column layout with minimal formatting, use only 1-2 standard fonts, and remove tables/images.",
+                    page=1,
+                    bbox=None
+                ))
+            elif score > 40:
+                # Complex - HIGH
+                issues.append(ATSIssue(
+                    code="complex_layout",
+                    severity=IssueSeverity.HIGH,
+                    section=IssueSection.GENERAL,
+                    message="Resume has complex layout",
+                    details=f"Your resume may have ATS parsing issues. Contributing factors: {factors_str}. Recommendation: Simplify formatting and reduce use of tables, images, and multiple fonts.",
+                    page=1,
+                    bbox=None
+                ))
+            elif score > 20:
+                # Moderate - MEDIUM
+                issues.append(ATSIssue(
+                    code="moderate_complexity",
+                    severity=IssueSeverity.MEDIUM,
+                    section=IssueSection.GENERAL,
+                    message="Resume has moderate layout complexity",
+                    details=f"Your resume is generally ATS-friendly but could be improved. {factors_str}. Consider simplifying to maximize ATS compatibility.",
+                    page=1,
+                    bbox=None
+                ))
         
         return issues
     
@@ -198,7 +224,6 @@ class ATSIssueDetector:
             # Detect layout features
             columns = self._detect_columns(page_blocks, page_width)
             tables = self._detect_tables(page_blocks)
-            text_boxes = self._detect_text_boxes(page_blocks, page_width)
             
             # Build enriched blocks
             for i, pb in enumerate(page_blocks):
@@ -210,7 +235,6 @@ class ATSIssueDetector:
                     "region": self._determine_region(bbox, page_height),
                     "in_table": i in tables,
                     "column": columns.get(i, 1),
-                    "in_text_box": i in text_boxes,
                     "fonts": self._extract_fonts(pb["block_data"]),
                     "page_width": page_width,
                     "page_height": page_height
@@ -297,26 +321,6 @@ class ATSIssueDetector:
                             table_blocks.add(idx)
         
         return table_blocks
-    
-    def _detect_text_boxes(self, blocks: List[Dict[str, Any]], page_width: float) -> Set[int]:
-        """Detect floating text boxes"""
-        text_box_blocks = set()
-        
-        for i, block in enumerate(blocks):
-            bbox = block["bbox"]
-            x0, x1 = bbox[0], bbox[2]
-            width = x1 - x0
-            
-            left_margin = x0
-            right_margin = page_width - x1
-            
-            is_narrow = width < page_width * 0.3
-            is_isolated = left_margin > page_width * 0.15 and right_margin > page_width * 0.15
-            
-            if is_narrow and is_isolated:
-                text_box_blocks.add(i)
-        
-        return text_box_blocks
     
     def _determine_region(self, bbox: Tuple[float, float, float, float], page_height: float) -> str:
         """Determine if block is in header, footer, or body"""
@@ -679,23 +683,6 @@ class ATSIssueDetector:
         doc.close()
         return issues
     
-    def _detect_floating_text_boxes(self, blocks: List[Dict[str, Any]]) -> List[ATSIssue]:
-        """Detect floating text boxes"""
-        issues = []
-        
-        for block in blocks:
-            if block.get("in_text_box", False):
-                issues.append(self._create_issue(
-                    code="floating_text_box",
-                    severity=IssueSeverity.MEDIUM,
-                    section=IssueSection.GENERAL,
-                    message="Floating text box detected",
-                    details="This content appears to be in a floating text box. ATS systems may read these out of order or miss them entirely. Move this content to the main text flow.",
-                    block=block
-                ))
-        
-        return issues
-    
     def _detect_icons(self, file_path: str, parsed_data: Dict[str, Any]) -> List[ATSIssue]:
         """Detect icons used instead of text"""
         issues = []
@@ -793,15 +780,29 @@ class ATSIssueDetector:
         """Detect uncommon fonts that may confuse ATS"""
         issues = []
         
-        # ATS-friendly fonts
+        # ATS-friendly fonts (widely supported and readable)
         ats_friendly = {
+            # Serif fonts
             'cambria', 'garamond', 'georgia', 'palatino', 'times', 'times new roman',
-            'arial', 'calibri', 'helvetica', 'tahoma', 'verdana', 'trebuchet'
+            'book antiqua', 'bookman', 'century', 'lucida', 'palatino linotype',
+            # Sans-serif fonts
+            'arial', 'calibri', 'helvetica', 'tahoma', 'verdana', 'trebuchet',
+            'trebuchet ms', 'segoe', 'segoe ui', 'lucida sans', 'open sans',
+            'roboto', 'lato', 'source sans', 'noto', 'noto sans',
+            # Common system fonts
+            'helvetica neue', 'arial black', 'century gothic', 'franklin gothic',
+            # Monospace (for technical resumes)
+            'courier', 'courier new', 'consolas', 'monaco',
+            # TeX/Academic fonts (acceptable for technical resumes)
+            'computer modern', 'latin modern',
         }
         
-        # Decorative fonts to avoid
+        # Decorative fonts to avoid (hard to read, unprofessional)
         decorative = {
-            'comic sans', 'comicsans', 'papyrus', 'brush script', 'curlz', 'impact'
+            'comic sans', 'comicsans', 'comic sans ms',
+            'papyrus', 'brush script', 'curlz', 'impact',
+            'chiller', 'jokerman', 'kristen', 'juice',
+            'showcard gothic', 'snap itc', 'stencil'
         }
         
         doc = fitz.open(file_path)
@@ -813,7 +814,7 @@ class ATSIssueDetector:
                 if block.get("type") == 0:
                     for line in block.get("lines", []):
                         for span in line.get("spans", []):
-                            font_name = span.get("font", "").lower().strip()
+                            font_name = span.get("font", "").strip()
                             if font_name:
                                 cleaned = self._clean_font_name(font_name)
                                 if cleaned:
@@ -837,6 +838,7 @@ class ATSIssueDetector:
         
         # Check for uncommon fonts
         uncommon = [f for f in all_fonts if not any(friendly in f for friendly in ats_friendly) and not any(dec in f for dec in decorative)]
+        
         if uncommon:
             issues.append(ATSIssue(
                 code="uncommon_font",
@@ -1070,65 +1072,157 @@ class ATSIssueDetector:
         )
     
     def _clean_font_name(self, raw_font_name: str) -> str:
-        """Clean and standardize font names"""
+        """
+        Clean and standardize font names from PDFs.
+        
+        PDFs contain many weird font names that aren't user-recognizable:
+        - Subset prefixes: "ABCDEF+Arial" → "Arial"
+        - TeX/LaTeX fonts: "cmbx10", "cmr12" → "Computer Modern"
+        - Internal IDs: "F1", "G12", "T3" → ignored
+        - Platform names: "ArialMT", "TimesNewRomanPSMT" → "Arial", "Times New Roman"
+        
+        Returns:
+            Cleaned font name, or empty string if unrecognizable (to skip it)
+        """
         if not raw_font_name:
             return ""
         
-        font_name = raw_font_name.lower().strip()
+        font_name = raw_font_name.strip()
+        original_name = font_name  # Keep for debugging
+        font_name = font_name.lower()
         
-        # Remove font subset prefix (e.g., "ABCDEE+" or "CRNSY6+")
+        # Step 1: Remove font subset prefix (e.g., "ABCDEF+" or "XYZABC+")
+        # These are 6 uppercase letters followed by a plus sign
         if '+' in font_name:
             font_name = font_name.split('+')[-1]
         
-        # Ignore fonts that look like internal PDF identifiers (gibberish)
-        # Real fonts have recognizable names, not random character sequences
-        ignore_patterns = [
-            'fontawesome',  # Icon fonts (not readable text)
-            'noto',  # Noto fonts are actually ok, but let's be selective
-        ]
-        
-        # If font name is too short or looks like an ID (e.g., 'cf10', 'crnsy6')
-        if len(font_name) < 4 or (len(font_name) < 8 and any(c.isdigit() for c in font_name)):
-            # Check if it's a known font abbreviation
-            known_abbrevs = {
-                'cmr': 'computer modern',
-                'cmb': 'computer modern',
-                'cmbx': 'computer modern',
-                'cmsy': 'computer modern',
-            }
-            for abbrev, full_name in known_abbrevs.items():
-                if font_name.startswith(abbrev):
-                    return full_name
-            # Otherwise, ignore it (likely an internal identifier)
-            return ""
-        
-        # Ignore icon fonts
-        for pattern in ignore_patterns:
-            if pattern in font_name:
+        # Step 2: Ignore icon/symbol fonts entirely
+        icon_fonts = ['fontawesome', 'fa-', 'glyphicons', 'icomoon', 'material', 
+                      'wingdings', 'webdings', 'symbol', 'zapfdingbats', 'dingbats']
+        for icon in icon_fonts:
+            if icon in font_name:
                 return ""
         
-        # Map common internal names to readable names
+        # Step 3: Map TeX/LaTeX font abbreviations to readable names
+        # These are commonly used in academic/technical resumes
+        tex_fonts = {
+            'cmr': 'computer modern',      # Computer Modern Roman
+            'cmb': 'computer modern',      # Computer Modern Bold
+            'cmbx': 'computer modern',     # Computer Modern Bold Extended
+            'cmti': 'computer modern',     # Computer Modern Text Italic
+            'cmsl': 'computer modern',     # Computer Modern Slanted
+            'cmss': 'computer modern',     # Computer Modern Sans Serif
+            'cmtt': 'computer modern',     # Computer Modern Typewriter
+            'cmssbx': 'computer modern',   # Computer Modern Sans Serif Bold
+            'cmsy': 'computer modern',     # Computer Modern Symbol
+            'cmmi': 'computer modern',     # Computer Modern Math Italic
+            'cmex': 'computer modern',     # Computer Modern Extended
+            'cmcsc': 'computer modern',    # Computer Modern Small Caps
+            'cmu': 'computer modern',      # Computer Modern Unicode
+            'cmfi': 'computer modern',     # Computer Modern Fibonacci
+            'cmff': 'computer modern',     # Computer Modern Funny Font
+            'cminch': 'computer modern',   # Computer Modern Inch
+            'lmr': 'latin modern',         # Latin Modern Roman
+            'lmss': 'latin modern',        # Latin Modern Sans
+            'lmtt': 'latin modern',        # Latin Modern Typewriter
+            'ec': 'european computer modern',
+            'ptm': 'times',                # PostScript Times
+            'phv': 'helvetica',            # PostScript Helvetica
+            'pcr': 'courier',              # PostScript Courier
+            'ppl': 'palatino',             # PostScript Palatino
+            'pbk': 'bookman',              # PostScript Bookman
+            'pag': 'avant garde',          # PostScript Avant Garde
+            'pnc': 'new century schoolbook',
+            'pzc': 'zapf chancery',
+        }
+        for abbrev, full_name in tex_fonts.items():
+            if font_name.startswith(abbrev) and len(font_name) <= len(abbrev) + 3:
+                # Matches patterns like "cmr10", "cmbx12", "lmr17"
+                return full_name
+        
+        # Step 4: Ignore internal PDF identifiers
+        # These are typically short alphanumeric strings like "F1", "G12", "T3", "C2_0"
+        import re
+        internal_patterns = [
+            r'^[a-z]\d+$',           # F1, G12, T3
+            r'^[a-z]\d+_\d+$',       # C2_0, F1_2
+            r'^[a-z]{1,2}\d{1,3}$',  # TT1, MT12
+            r'^f\d+$',               # f0, f1, f2 (common internal names)
+        ]
+        for pattern in internal_patterns:
+            if re.match(pattern, font_name):
+                return ""
+        
+        # Step 5: Map common PDF internal names to readable names
         font_mapping = {
+            # Adobe/PDF standard names
             'arialmt': 'arial',
+            'arial-boldmt': 'arial',
+            'arial-italicmt': 'arial',
+            'arial-bolditalicmt': 'arial',
+            'arialmtblack': 'arial black',
             'timesnewromanpsmt': 'times new roman',
+            'timesnewromanps-boldmt': 'times new roman',
+            'timesnewromanps-italicmt': 'times new roman',
             'timesnewroman': 'times new roman',
-            'courier': 'courier new',
-            'helvetica': 'helvetica'
+            'times-roman': 'times new roman',
+            'times-bold': 'times new roman',
+            'times-italic': 'times new roman',
+            'courier-bold': 'courier',
+            'courier-oblique': 'courier',
+            'couriernewpsmt': 'courier new',
+            'helvetica-bold': 'helvetica',
+            'helvetica-oblique': 'helvetica',
+            'helveticaneue': 'helvetica neue',
+            'helvetica-neue': 'helvetica neue',
+            'calibri-bold': 'calibri',
+            'calibri-italic': 'calibri',
+            'calibri-light': 'calibri',
+            'cambria-bold': 'cambria',
+            'cambria-italic': 'cambria',
+            'georgia-bold': 'georgia',
+            'georgia-italic': 'georgia',
+            'verdana-bold': 'verdana',
+            'verdana-italic': 'verdana',
+            'tahoma-bold': 'tahoma',
+            'trebuchetms': 'trebuchet ms',
+            'trebuchetms-bold': 'trebuchet ms',
+            'palatino-roman': 'palatino',
+            'palatino-bold': 'palatino',
+            'palatinolinotype': 'palatino linotype',
+            'bookoldstyle': 'bookman old style',
+            'garamond-bold': 'garamond',
+            'garamond-italic': 'garamond',
         }
         
         for internal, readable in font_mapping.items():
-            if font_name.startswith(internal):
+            if font_name == internal or font_name.startswith(internal):
                 return readable
         
-        # Remove common suffixes and separators
-        suffixes = ['-bold', '-italic', '-regular', 'mt', 'ps', 'psmt']
-        for suffix in suffixes:
-            font_name = font_name.replace(suffix, '')
+        # Step 6: Clean up remaining font names
+        # Remove common style suffixes
+        style_suffixes = [
+            '-bold', '-italic', '-regular', '-light', '-medium', '-semibold',
+            '-black', '-oblique', '-condensed', '-extended', '-narrow',
+            'bold', 'italic', 'regular', 'light', 'medium',
+            'mt', 'ps', 'psmt', 'std', 'pro', 'lt', 'bd', 'it'
+        ]
         
-        cleaned = font_name.replace('-', '').replace('_', '').strip()
+        cleaned = font_name
+        for suffix in style_suffixes:
+            if cleaned.endswith(suffix):
+                cleaned = cleaned[:-len(suffix)]
         
-        # Final check: if cleaned name is very short or all lowercase gibberish, ignore it
-        if len(cleaned) < 4:
+        # Remove separators and clean up
+        cleaned = cleaned.replace('-', ' ').replace('_', ' ').strip()
+        
+        # Step 7: Final validation
+        # If it's still too short or looks like gibberish, ignore it
+        if len(cleaned) < 3:
+            return ""
+        
+        # Check if it contains at least some recognizable letters
+        if not re.search(r'[a-z]{3,}', cleaned):
             return ""
         
         return cleaned
@@ -1170,7 +1264,6 @@ class ATSIssueDetector:
             "experience_not_extracted": "Experience section not readable by ATS - check formatting",
             "education_not_extracted": "Education section not readable by ATS - check formatting",
             "image_content": "Remove images and replace any important content with plain text",
-            "floating_text_box": "Replace floating text boxes with standard left-aligned text",
             "scanned_pdf": "Convert scanned/image PDF to text-based PDF by exporting from your original document editor",
             "icon_usage": "Replace icons with text labels for all contact information and links",
             "decorative_font": "Replace decorative fonts with ATS-friendly fonts like Arial, Calibri, or Georgia",
