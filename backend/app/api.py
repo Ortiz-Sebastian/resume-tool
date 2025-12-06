@@ -335,8 +335,24 @@ async def llm_diagnostic(request: LLMDiagnosticRequest, db: Session = Depends(ge
     detector = ATSIssueDetector()
     blocks = detector._extract_blocks_with_metadata(file_path)
     
+    # Get ATS diagnostics (if available) - we can generate it or it might be in parsed_data
+    ats_diagnostics = None
+    if resume.parsed_data and 'ats_diagnostics' in resume.parsed_data:
+        ats_diagnostics = resume.parsed_data.get('ats_diagnostics')
+    else:
+        # Generate diagnostics if not available
+        from app.services.ats_view_generator import ATSViewGenerator
+        view_gen = ATSViewGenerator()
+        diagnostics_result = view_gen.generate_ats_view(file_path, resume.file_type)
+        ats_diagnostics = diagnostics_result.get('diagnostics')
+    
     # Prepare condensed diagnostic data
-    diagnostic_data = prepare_diagnostic_data(resume.parsed_data, blocks)
+    diagnostic_data = prepare_diagnostic_data(
+        resume.parsed_data, 
+        blocks, 
+        file_path=file_path,
+        ats_diagnostics=ats_diagnostics
+    )
     
     # Get LLM explanation (issues already detected by rules)
     llm = LLMDiagnostic()

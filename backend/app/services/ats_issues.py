@@ -398,26 +398,66 @@ def compute_complexity_metric(
     Returns:
         ComplexityMetric object with score, label, and contributing factors
     """
+    print("\n" + "="*60)
+    print("[COMPLEXITY DEBUG] Starting complexity calculation")
+    print("="*60)
+    print(f"Input parameters:")
+    print(f"  - Font count: {font_count}")
+    print(f"  - Has images: {has_images} ({image_count} total)")
+    print(f"  - Has tables: {has_tables} ({table_count} total)")
+    print(f"  - Multi-column: {has_multi_column}")
+    print(f"  - Secondary column ratio: {secondary_column_ratio:.2%}")
+    print(f"  - Headers/footers: {has_headers_footers}")
+    print("-"*60)
+    print("Penalty calculations:")
+    
     score = 0.0
     factors = []
+    score_breakdown = []  # Track score contributions for debugging
+    
+    # Font complexity (NOTE: Currently not penalized, but tracked for reference)
+    # According to docstring: 3-4 fonts = +10, 5-6 fonts = +20, 7+ fonts = +30
+    if font_count > 2:
+        font_penalty = 0  # Not currently applied
+        if font_count <= 4:
+            would_be_penalty = 10
+        elif font_count <= 6:
+            would_be_penalty = 20
+        else:
+            would_be_penalty = 30
+        print(f"  [No penalty] Fonts: {font_count} fonts detected (would be +{would_be_penalty} if enabled)")
+    else:
+        print(f"  [No penalty] Fonts: {font_count} fonts (within acceptable range)")
     
     # Image complexity
     if has_images:
-        score += 15
-        score += min((image_count - 1) * 2, 10)  # Cap additional penalty at 10
+        base_image_penalty = 15
+        additional_penalty = min((image_count - 1) * 2, 10)  # Cap additional penalty at 10
+        image_total = base_image_penalty + additional_penalty
+        score += image_total
+        score_breakdown.append(f"Images: +{image_total} (base: {base_image_penalty}, additional: {additional_penalty} for {image_count} images)")
+        print(f"  [Penalty] Images: +{image_total:.1f} (base: {base_image_penalty}, +{additional_penalty} for {image_count} images)")
         if image_count == 1:
             factors.append("Contains 1 image")
         else:
             factors.append(f"Contains {image_count} images")
+    else:
+        print(f"  [No penalty] No images detected")
     
     # Table complexity
     if has_tables:
-        score += 15
-        score += min((table_count - 1) * 3, 15)  # Cap additional penalty at 15
+        base_table_penalty = 15
+        additional_penalty = min((table_count - 1) * 3, 15)  # Cap additional penalty at 15
+        table_total = base_table_penalty + additional_penalty
+        score += table_total
+        score_breakdown.append(f"Tables: +{table_total} (base: {base_table_penalty}, additional: {additional_penalty} for {table_count} tables)")
+        print(f"  [Penalty] Tables: +{table_total:.1f} (base: {base_table_penalty}, +{additional_penalty} for {table_count} tables)")
         if table_count == 1:
             factors.append("Uses table layout")
         else:
             factors.append(f"Uses {table_count} tables")
+    else:
+        print(f"  [No penalty] No tables detected")
     
     # Multi-column penalty (weighted by how much content is in secondary columns)
     if has_multi_column:
@@ -427,21 +467,35 @@ def compute_complexity_metric(
         ratio_penalty = secondary_column_ratio * 20  # Up to +20 more points
         total_column_penalty = base_penalty + ratio_penalty
         score += total_column_penalty
-        
+        score_breakdown.append(f"Multi-column: +{total_column_penalty:.1f} (base: {base_penalty}, ratio: +{ratio_penalty:.1f} for {secondary_column_ratio:.1%} secondary content)")
+        print(f"  [Penalty] Multi-column: +{total_column_penalty:.1f} (base: {base_penalty}, +{ratio_penalty:.1f} for {secondary_column_ratio:.1%} secondary content)")
         if secondary_column_ratio > 0.3:
             # Significant content in secondary columns
             factors.append(f"Multi-column layout with {secondary_column_ratio*100:.0f}% content in secondary columns")
         else:
             # Minor sidebar
             factors.append("Multi-column layout detected")
+    else:
+        print(f"  [No penalty] Single-column layout detected")
     
     # Headers/footers penalty
     if has_headers_footers:
-        score += 10
+        header_footer_penalty = 10
+        score += header_footer_penalty
+        score_breakdown.append(f"Headers/footers: +{header_footer_penalty}")
+        print(f"  [Penalty] Headers/footers: +{header_footer_penalty}")
         factors.append("Has headers or footers with content")
+    else:
+        print(f"  [No penalty] No headers/footers detected")
+    
+    print("-"*60)
+    print(f"Score before capping: {score:.1f}")
     
     # Cap score at 100
+    original_score = score
     score = min(score, 100)
+    if original_score > 100:
+        print(f"Score capped from {original_score:.1f} to 100")
     
     # Determine label based on score
     if score <= 20:
@@ -452,6 +506,15 @@ def compute_complexity_metric(
         label = ComplexityLevel.COMPLEX
     else:
         label = ComplexityLevel.VERY_COMPLEX
+    
+    print("-"*60)
+    print(f"FINAL RESULTS:")
+    print(f"  Total Score: {score:.1f}/100")
+    print(f"  Label: {label.value}")
+    print(f"  Contributing Factors: {len(factors)}")
+    for i, factor in enumerate(factors, 1):
+        print(f"    {i}. {factor}")
+    print("="*60 + "\n")
     
     return ComplexityMetric(
         score=score,

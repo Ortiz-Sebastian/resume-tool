@@ -75,7 +75,7 @@ class ATSIssueDetector:
         
         # A. Diagnostics-based detection (from ATSViewGenerator)
         if ats_diagnostics:
-            issues.extend(self._detect_from_diagnostics(ats_diagnostics))
+            issues.extend(self._detect_from_diagnostics(ats_diagnostics, blocks))
         
         # B. Visual/layout-based detection (from PyMuPDF analysis)
         # 1. Scanned PDF
@@ -110,9 +110,11 @@ class ATSIssueDetector:
         
         return issues
     
-    def _detect_from_diagnostics(self, ats_diagnostics: Dict[str, Any]) -> List[ATSIssue]:
+    def _detect_from_diagnostics(self, ats_diagnostics: Dict[str, Any], blocks: List[Dict[str, Any]] = None) -> List[ATSIssue]:
         """Detect issues from ATS diagnostics (tables, images, headers, complexity)"""
         issues = []
+        if blocks is None:
+            blocks = []
         
         # Images issue
         if ats_diagnostics.get("has_images"):
@@ -137,6 +139,68 @@ class ATSIssueDetector:
                 page=1,
                 bbox=None  # Document-wide
             ))
+        
+        # Multi-column layout issue
+        if ats_diagnostics.get("has_multi_column"):
+            secondary_ratio = ats_diagnostics.get("secondary_column_ratio", 0.0)
+            
+            # Determine severity based on how much content is in secondary columns
+            if secondary_ratio > 0.4:
+                # High ratio = more severe
+                severity = IssueSeverity.HIGH
+                details = f"Multi-column layout detected with {secondary_ratio*100:.0f}% of content in secondary columns. This significantly increases the risk that ATS systems will misread or miss important information. Recommendation: Convert to single-column layout."
+            elif secondary_ratio > 0.2:
+                severity = IssueSeverity.MEDIUM
+                details = f"Multi-column layout detected with {secondary_ratio*100:.0f}% of content in secondary columns. ATS systems may read content in the wrong order or miss sidebar content. Recommendation: Use single-column layout for maximum compatibility."
+            else:
+                # Low ratio (small sidebar) - lower severity
+                severity = IssueSeverity.LOW
+                details = f"Multi-column layout detected with {secondary_ratio*100:.0f}% of content in secondary columns. Minor sidebar detected. While less risky, single-column layouts are still recommended for optimal ATS compatibility."
+            
+            # Find blocks in secondary columns (column > 1) to highlight
+            secondary_column_blocks = [b for b in blocks if b.get("column", 1) > 1]
+            
+            if secondary_column_blocks:
+                # Create one issue per page with secondary columns (to show highlights on PDF)
+                # Group blocks by page
+                blocks_by_page = {}
+                for block in secondary_column_blocks:
+                    page = block.get("page", 1)
+                    if page not in blocks_by_page:
+                        blocks_by_page[page] = []
+                    blocks_by_page[page].append(block)
+                
+                # Create one issue per page with secondary columns
+                # Use the first block's bbox as a representative highlight
+                for page_num, page_blocks in blocks_by_page.items():
+                    # Use the first secondary column block as the highlight location
+                    first_block = page_blocks[0]
+                    bbox = first_block.get("bbox")
+                    
+                    # Count how many blocks are in secondary columns on this page
+                    secondary_count = len(page_blocks)
+                    
+                    issues.append(ATSIssue(
+                        code="multi_column_layout",
+                        severity=severity,
+                        section=IssueSection.GENERAL,
+                        message=f"Multi-column layout detected (Page {page_num})",
+                        details=details + f" Found {secondary_count} block(s) in secondary column(s) on this page.",
+                        page=page_num,
+                        bbox=bbox,  # Highlight secondary column content
+                        location_hint=f"Secondary column content on page {page_num}"
+                    ))
+            else:
+                # Fallback: document-wide issue if no blocks found
+                issues.append(ATSIssue(
+                    code="multi_column_layout",
+                    severity=severity,
+                    section=IssueSection.GENERAL,
+                    message="Multi-column layout detected",
+                    details=details,
+                    page=1,
+                    bbox=None  # Document-wide (no highlight)
+                ))
         
         # Headers/footers issue (only flagged when truly detected)
         if ats_diagnostics.get("has_headers_footers"):
@@ -1255,6 +1319,7 @@ class ATSIssueDetector:
             "has_images": "Remove images and replace any important content with plain text",
             "has_tables": "Replace tables with simple text formatting using line breaks",
             "has_headers_footers": "Move contact information from header/footer to main document body",
+            "multi_column_layout": "Convert multi-column layout to single-column format for better ATS compatibility",
             "complex_layout": "Simplify layout: use single column, standard fonts, and consistent formatting",
             
             # Visual/layout-based recommendations

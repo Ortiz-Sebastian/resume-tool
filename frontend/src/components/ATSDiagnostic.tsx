@@ -97,36 +97,32 @@ export function ATSDiagnostic({ resumeId }: ATSDiagnosticProps) {
       </div>
 
       {/* Input Form */}
-      <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-gray-200 p-4">
-        <div className="flex items-start space-x-3">
-          <div className="flex-1">
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder="e.g., 'I'm missing 5 skills' or 'My email isn't showing up'"
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 resize-none"
-              rows={3}
-              disabled={loading}
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={loading || !prompt.trim()}
-            className="flex items-center space-x-2 px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {loading ? (
-              <>
-                <Loader className="h-5 w-5 animate-spin" />
-                <span>Analyzing...</span>
-              </>
-            ) : (
-              <>
-                <Send className="h-5 w-5" />
-                <span>Diagnose</span>
-              </>
-            )}
-          </button>
-        </div>
+      <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="e.g., 'I'm missing 5 skills' or 'My email isn't showing up'"
+          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 resize-none"
+          rows={3}
+          disabled={loading}
+        />
+        <button
+          type="submit"
+          disabled={loading || !prompt.trim()}
+          className="w-full flex items-center justify-center space-x-2 px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {loading ? (
+            <>
+              <Loader className="h-5 w-5 animate-spin" />
+              <span>Analyzing...</span>
+            </>
+          ) : (
+            <>
+              <Send className="h-5 w-5" />
+              <span>Diagnose</span>
+            </>
+          )}
+        </button>
       </form>
 
       {/* Error */}

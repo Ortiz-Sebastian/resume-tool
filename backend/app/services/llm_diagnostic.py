@@ -243,17 +243,39 @@ Be concise. Focus on the most relevant issue(s)."""
 
 def prepare_diagnostic_data(
     parsed_data: Dict[str, Any],
-    blocks: List[Dict[str, Any]]
+    blocks: List[Dict[str, Any]],
+    file_path: str = None,
+    ats_diagnostics: Dict[str, Any] = None
 ) -> Dict[str, Any]:
     """
     Prepare structured data for LLM explanation.
     Uses rule-based detection to find issues, then provides context for LLM to explain.
     """
-    from .ats_issues import ATSIssueDetector
+    from .ats_issue_detector import ATSIssueDetector
     
     # 1. Run business rules to detect issues (DEFINITIVE)
     detector = ATSIssueDetector()
-    issues = detector.detect_all_issues(blocks, parsed_data)
+    if file_path:
+        # Use the full detection method if file_path is available
+        issues = detector._detect_all_issues(file_path, blocks, parsed_data, ats_diagnostics)
+    else:
+        # Fallback: only run detections that don't require file_path
+        issues = []
+        # Contact issues
+        issues.extend(detector._detect_contact_issues(blocks, parsed_data))
+        # Skills issues
+        issues.extend(detector._detect_skills_issues(blocks, parsed_data))
+        # Experience issues
+        issues.extend(detector._detect_experience_issues(blocks, parsed_data))
+        # Education issues
+        issues.extend(detector._detect_education_issues(blocks, parsed_data))
+        # Date format issues
+        issues.extend(detector._detect_date_format_issues(blocks))
+        # Unmapped content
+        issues.extend(detector._detect_unmapped_content(blocks, parsed_data))
+        # Diagnostics-based issues (if available)
+        if ats_diagnostics:
+            issues.extend(detector._detect_from_diagnostics(ats_diagnostics, blocks))
     
     # Convert to dict for JSON serialization
     issues_dicts = [issue.to_dict() for issue in issues]

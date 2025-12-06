@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { FileUpload } from '@/components/FileUpload'
-import { ResumeViewer } from '@/components/ResumeViewer'
+import { ResumeComparison } from '@/components/ResumeComparison'
 import { ScoreCard } from '@/components/ScoreCard'
 import { RoleMatches } from '@/components/RoleMatches'
 import { PDFHighlightViewer } from '@/components/PDFHighlightViewer'
@@ -11,18 +11,23 @@ import { QuickRecommendations } from '@/components/QuickRecommendations'
 import { ATSDiagnostic } from '@/components/ATSDiagnostic'
 // TODO: Re-enable for later development
 // import { SkillSuggestions } from '@/components/SkillSuggestions'
-import { FileText, Target, Lightbulb, Upload } from 'lucide-react'
+import { FileText, Target, Lightbulb, Upload, Eye, AlertCircle, Zap, MessageSquare, Briefcase, ChevronLeft, ChevronRight } from 'lucide-react'
+
+type AnalysisView = 'overview' | 'fixes' | 'roles'
 
 export default function Home() {
   const [resumeId, setResumeId] = useState<number | null>(null)
   const [scoreData, setScoreData] = useState<any>(null)
   const [roleMatches, setRoleMatches] = useState<any[]>([])
   const [activeTab, setActiveTab] = useState<'upload' | 'analyze'>('upload')
+  const [activeView, setActiveView] = useState<AnalysisView>('overview')
   const [sectionAnalysis, setSectionAnalysis] = useState<any>(null)
+  const [aiPanelOpen, setAiPanelOpen] = useState<boolean>(true) // AI panel open by default
 
   const handleUploadSuccess = (id: number) => {
     setResumeId(id)
     setActiveTab('analyze')
+    setActiveView('overview') // Start with overview (format + comparison)
   }
 
   const handleScoreReceived = (data: any) => {
@@ -87,8 +92,8 @@ export default function Home() {
       </header>
 
       {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {activeTab === 'upload' && (
+      {activeTab === 'upload' && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="space-y-8">
             {/* Hero Section */}
             <div className="text-center space-y-4">
@@ -143,50 +148,69 @@ export default function Home() {
             {/* Upload Component */}
             <FileUpload onUploadSuccess={handleUploadSuccess} />
           </div>
-        )}
+        </div>
+      )}
 
-        {activeTab === 'analyze' && resumeId && (
-          <div className="space-y-8">
-            {/* 1. Side by Side Viewer - Compare original vs ATS */}
-            <ResumeViewer
-              resumeId={resumeId}
-              scoreData={scoreData}
-            />
+      {activeTab === 'analyze' && resumeId && (
+        <div className="flex gap-0">
+          {/* Left Sidebar Navigation - Aligned to left edge */}
+          <aside className="w-56 flex-shrink-0 pl-4 pr-4">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sticky top-8">
+              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">
+                Analysis Views
+              </h3>
+              <nav className="space-y-1">
+                <button
+                  onClick={() => setActiveView('overview')}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-colors ${
+                    activeView === 'overview'
+                      ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                      : 'text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  <Eye className={`h-5 w-5 ${activeView === 'overview' ? 'text-blue-600' : 'text-gray-400'}`} />
+                  <span className="font-medium">Overview</span>
+                </button>
 
-            {/* 2. Visual Issue Detection - PDF with highlights + Issue breakdown */}
-            {scoreData?.highlights && scoreData.highlights.length > 0 && (
-              <div className="space-y-6">
-                {/* Grid: PDF (2 cols) + Issue Summary (1 col) */}
-                <div className="grid lg:grid-cols-3 gap-6">
-                  {/* PDF with color-coded highlights (2 columns) */}
-                  <div className="lg:col-span-2">
-                    <PDFHighlightViewer
-                      pdfUrl={`http://localhost:8000/api/resume/${resumeId}/file`}
-                      highlights={scoreData.highlights}
-                      resumeId={resumeId}
-                    />
-                  </div>
+                <button
+                  onClick={() => setActiveView('fixes')}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-colors ${
+                    activeView === 'fixes'
+                      ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                      : 'text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  <Zap className={`h-5 w-5 ${activeView === 'fixes' ? 'text-blue-600' : 'text-gray-400'}`} />
+                  <span className="font-medium">Quick Fixes</span>
+                  {scoreData?.recommendations?.length > 0 && (
+                    <span className="ml-auto bg-blue-600 text-white text-xs px-2 py-0.5 rounded-full">
+                      {scoreData.recommendations.length}
+                    </span>
+                  )}
+                </button>
 
-                  {/* Right sidebar: Issue Summary (1 column) */}
-                  <div className="lg:col-span-1">
-                    <IssueSummaryPanel
-                      summary={scoreData.issue_summary}
-                      suggestions={[]}
-                      issues={scoreData.issues || []}
-                    />
-                  </div>
-                </div>
+                <button
+                  onClick={() => setActiveView('roles')}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-colors ${
+                    activeView === 'roles'
+                      ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                      : 'text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  <Briefcase className={`h-5 w-5 ${activeView === 'roles' ? 'text-blue-600' : 'text-gray-400'}`} />
+                  <span className="font-medium">Role Matches</span>
+                  {roleMatches.length > 0 && (
+                    <span className="ml-auto bg-blue-600 text-white text-xs px-2 py-0.5 rounded-full">
+                      {roleMatches.length}
+                    </span>
+                  )}
+                </button>
+              </nav>
+            </div>
+          </aside>
 
-                {/* 3. TIER 1: Quick Fixes - Below the entire row */}
-                {scoreData?.recommendations && scoreData.recommendations.length > 0 && (
-                  <QuickRecommendations
-                    recommendations={scoreData.recommendations}
-                    issueCount={scoreData.issue_summary?.total_issues || 0}
-                  />
-                )}
-              </div>
-            )}
-
+          {/* Main Content Area - Uses remaining space with proper padding */}
+          <div className="flex-1 min-w-0 py-8 pr-4 sm:pr-6 lg:pr-8">
             {/* Hidden: Score Overview - Trigger scoring but don't display */}
             <div className="hidden">
               <ScoreCard
@@ -195,25 +219,119 @@ export default function Home() {
               />
             </div>
 
-            {/* 4. TIER 2: AI Diagnostic - Detailed, on-demand analysis */}
-            <ATSDiagnostic resumeId={resumeId} />
+            {/* Overview View - Format Issues + Resume Comparison Combined */}
+            {activeView === 'overview' && (
+              <div className="space-y-8">
+                    {/* Resume Comparison Section */}
+                    <div>
+                      <h2 className="text-xl font-semibold text-gray-900 mb-4">Resume vs ATS View</h2>
+                      <ResumeComparison
+                        resumeId={resumeId}
+                        scoreData={scoreData}
+                      />
+                    </div>
 
-            {/* 5. Role Matches */}
-            <RoleMatches
-              resumeId={resumeId}
-              onMatchesReceived={handleRoleMatchesReceived}
-            />
+                    {/* Format Issues Section */}
+                    {scoreData?.highlights && scoreData.highlights.length > 0 ? (
+                      <div>
+                        <h2 className="text-xl font-semibold text-gray-900 mb-4">Format Issues & Highlights</h2>
+                        <div className="grid lg:grid-cols-3 gap-6">
+                          {/* PDF with color-coded highlights (2 columns) */}
+                          <div className="lg:col-span-2">
+                            <PDFHighlightViewer
+                              pdfUrl={`http://localhost:8000/api/resume/${resumeId}/file`}
+                              highlights={scoreData.highlights}
+                              resumeId={resumeId}
+                            />
+                          </div>
 
-            {/* TODO: Skill Suggestions - Re-enable for later development */}
-            {/* {roleMatches.length > 0 && (
-              <SkillSuggestions
+                          {/* Right sidebar: Issue Summary (1 column) */}
+                          <div className="lg:col-span-1">
+                            <IssueSummaryPanel
+                              summary={scoreData.issue_summary}
+                              suggestions={[]}
+                              issues={scoreData.issues || []}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
+                        <AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                        <h3 className="text-lg font-semibold text-gray-900 mb-2">No Format Issues Detected Yet</h3>
+                        <p className="text-gray-600">Analysis is in progress. Please wait a moment...</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+            {/* Quick Fixes View */}
+            {activeView === 'fixes' && (
+              <div className="space-y-6">
+                    {scoreData?.recommendations && scoreData.recommendations.length > 0 ? (
+                      <QuickRecommendations
+                        recommendations={scoreData.recommendations}
+                        issueCount={scoreData.issue_summary?.total_issues || 0}
+                      />
+                    ) : (
+                      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
+                        <Zap className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                        <h3 className="text-lg font-semibold text-gray-900 mb-2">No Quick Fixes Available</h3>
+                        <p className="text-gray-600">Complete the analysis to see recommendations.</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+            {/* Role Matches View */}
+            {activeView === 'roles' && (
+              <RoleMatches
                 resumeId={resumeId}
-                topRole={roleMatches[0]}
+                onMatchesReceived={handleRoleMatchesReceived}
               />
-            )} */}
+            )}
           </div>
+
+          {/* Right Side AI Assistant Panel - Overlay (Fixed Position) */}
+          <div
+            className={`fixed top-16 right-0 bottom-0 flex flex-col bg-white border-l border-gray-200 shadow-2xl transition-transform duration-300 z-50 ${
+              aiPanelOpen ? 'translate-x-0' : 'translate-x-full'
+            }`}
+            style={{ width: '384px' }}
+          >
+            {/* Panel Header */}
+            <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gray-50 flex-shrink-0">
+              <div className="flex items-center gap-2">
+                <MessageSquare className="h-5 w-5 text-blue-600" />
+                <h3 className="font-semibold text-gray-900">AI Assistant</h3>
+              </div>
+              <button
+                onClick={() => setAiPanelOpen(false)}
+                className="p-1 hover:bg-gray-200 rounded transition-colors"
+                aria-label="Collapse AI Assistant"
+              >
+                <ChevronRight className="h-5 w-5 text-gray-600" />
+              </button>
+            </div>
+
+            {/* Panel Content */}
+            <div className="flex-1 overflow-y-auto">
+              <ATSDiagnostic resumeId={resumeId} />
+            </div>
+          </div>
+
+          {/* Toggle Button (when panel is closed) - Fixed Position */}
+          {!aiPanelOpen && (
+            <button
+              onClick={() => setAiPanelOpen(true)}
+              className="fixed right-0 top-1/2 -translate-y-1/2 bg-blue-600 text-white p-3 rounded-l-lg shadow-lg hover:bg-blue-700 transition-colors z-40"
+              aria-label="Open AI Assistant"
+            >
+              <ChevronLeft className="h-5 w-5" />
+            </button>
+          )}
+        </div>
         )}
-      </div>
     </main>
   )
 }

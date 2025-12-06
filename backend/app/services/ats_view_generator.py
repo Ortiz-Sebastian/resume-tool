@@ -8,6 +8,7 @@ exactly how ATS systems will read the resume.
 import fitz  # PyMuPDF
 from docx import Document
 from typing import Dict, Any, List, Tuple
+from collections import Counter
 from app.services.ats_issues import compute_complexity_metric, compute_secondary_column_ratio
 
 
@@ -395,13 +396,11 @@ class ATSViewGenerator:
         # Look for significant gaps (> 20% of page width)
         gap_threshold = page_width * 0.2
         column_boundaries = [x_sorted[0]]
-        
+
         for i in range(1, len(x_sorted)):
             if x_sorted[i] - x_sorted[i-1] > gap_threshold:
                 column_boundaries.append(x_sorted[i])
-        
-        has_multi_column = len(column_boundaries) > 1
-        
+
         # Assign column numbers to blocks
         blocks_with_columns = []
         for block in blocks:
@@ -411,15 +410,30 @@ class ATSViewGenerator:
             for i, boundary in enumerate(column_boundaries):
                 if x0 >= boundary:
                     column = i + 1
-            
+
             blocks_with_columns.append({
                 "text": block["text"],
                 "column": column
             })
-        
+
         # Compute secondary column ratio using the helper function
         secondary_ratio = compute_secondary_column_ratio(blocks_with_columns)
         
+        # Only consider it multi-column if there's actually content in secondary columns
+        # (Multiple boundaries might exist, but if all content is in column 1, it's not multi-column)
+        has_multi_column = len(column_boundaries) > 1 and secondary_ratio > 0.0
+        
+        # Debug output
+        if len(column_boundaries) > 1:
+            print(f"\n[COLUMN DETECTION DEBUG]")
+            print(f"  Column boundaries found: {len(column_boundaries)} (at positions: {[f'{b:.1f}' for b in column_boundaries]})")
+            print(f"  Secondary column ratio: {secondary_ratio:.2%}")
+            print(f"  Has multi-column (after ratio check): {has_multi_column}")
+            # Show column distribution
+            col_counts = Counter([b.get('column', 1) for b in blocks_with_columns])
+            print(f"  Blocks per column: {dict(col_counts)}")
+            print()
+
         return has_multi_column, secondary_ratio
     
     def extract_text_with_coordinates(self, file_path: str) -> List[Dict[str, Any]]:
