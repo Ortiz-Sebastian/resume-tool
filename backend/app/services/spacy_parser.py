@@ -702,7 +702,7 @@ class SpacyResumeParser(BaseResumeParser):
         
         # Common section headers (expanded list)
         headers = [
-            "summary", "objective", "experience", "education", "skills",
+            "summary", "objective", "experience", "education", "skills", "relevant experience",
             "certifications", "projects", "awards", "publications",
             "volunteer", "languages", "interests", "references",
             "activities", "extracurricular", "leadership", "involvement",
@@ -715,8 +715,10 @@ class SpacyResumeParser(BaseResumeParser):
         line_lower = line.lower()
         
         # Check for exact header match
-        if any(header in line_lower for header in headers) and len(line) < 50:
-            return True
+        for header in headers:
+            pattern = rf"^\s*{re.escape(header)}\s*:?\s*$"
+            if re.match(pattern, line_lower):
+                return True
         
         # Additional heuristics for section headers:
         # - All caps (e.g., "EDUCATION")

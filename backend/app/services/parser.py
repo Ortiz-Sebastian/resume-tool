@@ -2,7 +2,7 @@
 Unified Resume Parser - Hybrid approach combining commercial and open-source parsers.
 
 This is the main entry point for resume parsing. It orchestrates:
-1. Commercial parser (Textkernel) for high-accuracy structured data extraction
+1. Commercial parser (Affinda API) for high-accuracy structured data extraction
 2. PyMuPDF for ATS view generation (always, regardless of parser choice)
 3. Fallback to spaCy if commercial parser unavailable
 
@@ -11,6 +11,7 @@ uniqueness (ATS diagnostics from PyMuPDF).
 """
 
 from typing import Dict, Any
+import os
 from app.config import settings
 from app.services.base_parser import BaseResumeParser
 from app.services.textkernel_parser import TextkernelParser
@@ -21,7 +22,7 @@ from app.services.ats_view_generator import ATSViewGenerator
 class ResumeParser:
     """
     Unified resume parser with hybrid approach:
-    - Uses commercial parser (Textkernel) for structured data when available
+    - Uses commercial parser (Affinda API) for structured data when available
     - Always uses PyMuPDF for ATS view and diagnostics
     - Falls back to spaCy parser if commercial parser not configured
     """
@@ -37,10 +38,10 @@ class ResumeParser:
         if parser_type == "textkernel":
             parser = TextkernelParser()
             if parser.is_available():
-                print(f"✓ Using Textkernel parser (commercial-grade accuracy)")
+                print(f"✓ Using Affinda API parser (commercial-grade accuracy)")
                 return parser
             else:
-                print(f"⚠ Textkernel configured but API key missing, falling back to spaCy")
+                print(f"⚠ Affinda API configured but API key/workspace ID missing, falling back to spaCy")
         
         # Default to spaCy parser
         parser = SpacyResumeParser()
@@ -50,7 +51,7 @@ class ResumeParser:
         else:
             raise ValueError(
                 "No parser available. Either:\n"
-                "1. Configure Textkernel: set TEXTKERNEL_API_KEY in .env\n"
+                "1. Configure Affinda API: set AFFINDA_API_KEY and AFFINDA_WORKSPACE_ID in .env\n"
                 "2. Install spaCy model: python -m spacy download en_core_web_lg"
             )
     
@@ -118,7 +119,8 @@ class ResumeParser:
             },
             "configuration": {
                 "parser_type": settings.parser_type,
-                "textkernel_configured": bool(settings.textkernel_api_key)
+                "affinda_configured": bool(os.getenv("AFFINDA_API_KEY") or settings.textkernel_api_key),
+                "affinda_workspace_configured": bool(os.getenv("AFFINDA_WORKSPACE_ID") or settings.affinda_workspace_id)
             }
         }
 

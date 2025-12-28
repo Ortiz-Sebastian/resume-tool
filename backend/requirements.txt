@@ -37,8 +37,10 @@ passlib[bcrypt]==1.7.4
 python-dotenv==1.0.0
 boto3==1.29.7
 aiofiles==23.2.1
+requests==2.31.0  # Pinned to fix Affinda SDK compatibility issue
 httpx==0.25.2  # Required for Textkernel API calls
 python-dateutil==2.8.2  # Enhanced date parsing for spaCy parser
+affinda>=4.28.7  # Affinda API client (Textkernel-powered resume parsing)
 
 # Development
 pytest==7.4.3

@@ -24,9 +24,10 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     
     # Resume Parsing
-    parser_type: str = "spacy"  # Options: "textkernel", "spacy"
-    textkernel_api_key: str = ""
-    textkernel_api_url: str = "https://api.textkernel.com/tx/v10/parser"
+    parser_type: str = "textkernel"  # Options: "textkernel" (uses Affinda API), "spacy" - Default to textkernel/Affinda
+    textkernel_api_key: str = ""  # For backward compatibility, but use AFFINDA_API_KEY env var instead
+    textkernel_api_url: str = "https://api.textkernel.com/tx/v10/parser"  # Legacy, not used with Affinda
+    affinda_workspace_id: str = ""  # AFFINDA_WORKSPACE_ID env var
     
     # AWS S3
     aws_access_key_id: str = ""
