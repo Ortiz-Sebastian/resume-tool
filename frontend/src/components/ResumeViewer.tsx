@@ -17,18 +17,66 @@ export function ResumeViewer({ resumeId, scoreData }: ResumeViewerProps) {
   const [error, setError] = useState<string>('')
 
   useEffect(() => {
-    fetchParsedData()
+    if (resumeId) {
+      setParsedData(null) // Reset data when resumeId changes
+      setError('')
+      fetchParsedData()
+    }
   }, [resumeId])
 
-  const fetchParsedData = async () => {
+  const fetchParsedData = async (retryCount = 0) => {
+    const maxRetries = 30 // 30 retries = ~60 seconds max wait time
+    const retryDelay = 2000 // 2 seconds between retries
+    
     try {
-      setLoading(true)
+      if (retryCount === 0) {
+        setLoading(true)
+      }
       const response = await axios.get(`${API_URL}/api/resume/${resumeId}/parsed`)
-      setParsedData(response.data.parsed_data)
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to load parsed resume')
-    } finally {
+      
+      // Check if we got a 202 (parsing in progress)
+      if (response.status === 202) {
+        if (retryCount < maxRetries) {
+          // Wait and retry
+          setTimeout(() => {
+            fetchParsedData(retryCount + 1)
+          }, retryDelay)
+          return
+        } else {
+          setError('Parsing is taking longer than expected. Please refresh the page.')
+          setLoading(false)
+          return
+        }
+      }
+      
+      // Success - data is ready
+      const parsedDataFromResponse = response.data.parsed_data
+      
+      if (!parsedDataFromResponse) {
+        setError('No parsed data received from server')
+        setLoading(false)
+        return
+      }
+      
+      setParsedData(parsedDataFromResponse)
+      setError('')
       setLoading(false)
+    } catch (err: any) {
+      // Check if it's a 202 status (parsing in progress)
+      if (err.response?.status === 202) {
+        if (retryCount < maxRetries) {
+          setTimeout(() => {
+            fetchParsedData(retryCount + 1)
+          }, retryDelay)
+          return
+        } else {
+          setError('Parsing is taking longer than expected. Please refresh the page.')
+          setLoading(false)
+        }
+      } else {
+        setError(err.response?.data?.detail || 'Failed to load parsed resume')
+        setLoading(false)
+      }
     }
   }
 
@@ -73,12 +121,22 @@ export function ResumeViewer({ resumeId, scoreData }: ResumeViewerProps) {
           </div>
           <div className="p-6 h-[600px] overflow-y-auto scrollbar-hide">
             <div className="prose prose-sm max-w-none">
-              {parsedData?.raw_text ? (
+              {parsedData?.raw_text && parsedData.raw_text.trim().length > 0 ? (
                 <pre className="whitespace-pre-wrap text-sm font-mono text-gray-700">
                   {parsedData.raw_text}
                 </pre>
               ) : (
-                <p className="text-gray-500">Original text not available</p>
+                <div className="text-gray-500">
+                  <p>Original text not available</p>
+                  <p className="text-xs mt-2">Debug: parsedData is {parsedData ? 'defined' : 'undefined'}</p>
+                  <p className="text-xs">raw_text is {parsedData?.raw_text ? `defined (type: ${typeof parsedData.raw_text}, length: ${parsedData.raw_text?.length || 0})` : 'undefined'}</p>
+                  <p className="text-xs">Keys: {parsedData ? Object.keys(parsedData).join(', ') : 'N/A'}</p>
+                  {parsedData && (
+                    <pre className="text-xs mt-2 bg-gray-100 p-2 rounded overflow-auto max-h-40">
+                      {JSON.stringify(parsedData, null, 2).substring(0, 500)}
+                    </pre>
+                  )}
+                </div>
               )}
             </div>
           </div>

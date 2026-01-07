@@ -36,32 +36,40 @@ class ATSIssueDetector:
         
         Returns dict with highlights, summary, recommendations, and issue list.
         """
-        if file_type != ".pdf":
-            return self._empty_result("Only PDF analysis is supported")
-        
-        # Extract blocks with metadata
-        blocks = self._extract_blocks_with_metadata(file_path)
-        
-        # Run all detections - returns List[ATSIssue]
-        issues = self._detect_all_issues(file_path, blocks, parsed_data, ats_diagnostics)
-        
-        # Convert to legacy format (skip issues with no bbox - they're document-wide)
-        highlights = [self._issue_to_highlight(issue) for issue in issues if issue.bbox is not None]
-        
-        # Generate recommendations based on detected issues
-        recommendations = self._issues_to_recommendations(issues)
-        
-        # Convert issues to simple string messages for the issues list
-        issue_messages = [issue.message for issue in issues]
-        
-        summary = self._calculate_summary(highlights)
-        
-        return {
-            "highlights": highlights,
-            "summary": summary,
-            "recommendations": recommendations,
-            "issues": issue_messages  # String list for "Issues Detected" panel
-        }
+        try:
+            if file_type != ".pdf":
+                return self._empty_result("Only PDF analysis is supported")
+            
+            # Extract blocks with metadata
+            blocks = self._extract_blocks_with_metadata(file_path)
+            
+            # Run all detections - returns List[ATSIssue]
+            issues = self._detect_all_issues(file_path, blocks, parsed_data, ats_diagnostics)
+            
+            # Convert to legacy format (skip issues with no bbox - they're document-wide)
+            highlights = [self._issue_to_highlight(issue) for issue in issues if issue.bbox is not None]
+            
+            # Generate recommendations based on detected issues
+            recommendations = self._issues_to_recommendations(issues)
+            
+            # Convert issues to simple string messages for the issues list
+            issue_messages = [issue.message for issue in issues]
+            
+            summary = self._calculate_summary(highlights)
+            
+            result = {
+                "highlights": highlights,
+                "summary": summary,
+                "recommendations": recommendations,
+                "issues": issue_messages  # String list for "Issues Detected" panel
+            }
+            return result
+        except Exception as e:
+            # If anything fails, return empty result with error message
+            print(f"[ATS ISSUE DETECTOR ERROR] Issue detection failed: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return self._empty_result(f"Issue detection failed: {str(e)}")
     
     def _detect_all_issues(
         self,
@@ -75,35 +83,42 @@ class ATSIssueDetector:
         
         # A. Diagnostics-based detection (from ATSViewGenerator)
         if ats_diagnostics:
-            issues.extend(self._detect_from_diagnostics(ats_diagnostics, blocks))
+            diag_issues = self._detect_from_diagnostics(ats_diagnostics, blocks)
+            issues.extend(diag_issues)
         
         # B. Visual/layout-based detection (from PyMuPDF analysis)
         # 1. Scanned PDF
-        issues.extend(self._detect_scanned_pdf(file_path))
+        scanned_issues = self._detect_scanned_pdf(file_path)
+        issues.extend(scanned_issues)
         
         # 2. Contact issues
-        issues.extend(self._detect_contact_issues(blocks, parsed_data))
+        contact_issues = self._detect_contact_issues(blocks, parsed_data)
+        issues.extend(contact_issues)
         
         # 3. Skills issues
-        issues.extend(self._detect_skills_issues(blocks, parsed_data))
+        skills_issues = self._detect_skills_issues(blocks, parsed_data)
+        issues.extend(skills_issues)
         
         # 4. Experience issues
-        issues.extend(self._detect_experience_issues(blocks, parsed_data))
+        exp_issues = self._detect_experience_issues(blocks, parsed_data)
+        issues.extend(exp_issues)
         
         # 5. Education issues
-        issues.extend(self._detect_education_issues(blocks, parsed_data))
+        edu_issues = self._detect_education_issues(blocks, parsed_data)
+        issues.extend(edu_issues)
         
         # 6. Images
-        issues.extend(self._detect_images(file_path))
+        img_issues = self._detect_images(file_path)
+        issues.extend(img_issues)
         
         # 7. Icons
-        issues.extend(self._detect_icons(file_path, parsed_data))
+        icon_issues = self._detect_icons(file_path, parsed_data)
+        issues.extend(icon_issues)
         
         # 9. Date format issues
         issues.extend(self._detect_date_format_issues(blocks))
         
-        # 10. Font issues
-        issues.extend(self._detect_font_issues(file_path, blocks))
+        # 10. Font issue
         
         # 11. Unmapped content
         issues.extend(self._detect_unmapped_content(blocks, parsed_data))
@@ -498,7 +513,6 @@ class ATSIssueDetector:
         # Patterns
         email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
         phone_pattern = r'\b(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b'
-        linkedin_pattern = r'(?:linkedin\.com/in/|linkedin\.com/pub/)[\w-]+'
         
         all_text = "\n".join([b.get("text", "") for b in blocks])
         
@@ -532,22 +546,6 @@ class ATSIssueDetector:
                             details="Your phone number is visible but was NOT extracted by the ATS parser. Likely cause: Phone is in header/footer. Fix: Use standard format like (555) 123-4567 in the main body.",
                             block=block
                         ))
-                    break
-        
-        # LinkedIn issues
-        linkedin = contact_info.get("linkedin") or parsed_data.get("linkedin")
-        linkedin_in_text = re.findall(linkedin_pattern, all_text, re.IGNORECASE)
-        if linkedin_in_text and not linkedin:
-            for block in blocks:
-                if re.search(linkedin_pattern, block.get("text", ""), re.IGNORECASE):
-                    issues.append(self._create_issue(
-                        code="contact_linkedin_not_extracted",
-                        severity=IssueSeverity.MEDIUM,
-                        section=IssueSection.CONTACT,
-                        message="LinkedIn not extracted by ATS",
-                        details="Your LinkedIn URL is visible but was NOT extracted by the ATS. Likely causes: LinkedIn displayed as icon only, or in header/footer. Fix: Write full URL as text: linkedin.com/in/yourname",
-                        block=block
-                    ))
                     break
         
         return issues
@@ -931,40 +929,76 @@ class ATSIssueDetector:
         parsed_fragments = self._collect_parsed_fragments(parsed_data)
         
         # Check blocks for unmapped content
-        for block in blocks:
-            text_lower = block["text"].lower().strip()
+        unmapped_count = 0
+        skipped_short = 0
+        skipped_mapped = 0
+        skipped_header = 0
+        skipped_region = 0
+        skipped_bullet = 0
+        skipped_length = 0
+        
+        for idx, block in enumerate(blocks):
+            text_lower = block.get("text", "").lower().strip()
+            text_original = block.get("text", "").strip()
+            block_region = block.get("region", "body")
             
             # Skip short blocks
             if len(text_lower) < 10:
+                skipped_short += 1
                 continue
             
-            # Only flag longer, substantial blocks that are truly unmapped
-            # Increased threshold to 80 chars to reduce false positives
-            if not self._is_content_mapped(text_lower, parsed_fragments) and len(text_lower) > 80:
-                # Check if it's a common section header or metadata
-                if self._is_section_header_or_metadata(text_lower):
-                    continue
-                
-                # Only flag body content (not headers/footers/sidebars)
-                if block["region"] == "body":
-                    # Additional check: skip if it looks like a job description bullet
-                    # (contains action verbs and technical terms)
-                    if self._looks_like_experience_bullet(text_lower):
-                        continue
-                    
-                    # Create a preview of the content (first 60 chars)
-                    preview = block["text"].strip()[:60]
-                    if len(block["text"].strip()) > 60:
-                        preview += "..."
-                    
-                    issues.append(self._create_issue(
-                        code="unmapped_content",
-                        severity=IssueSeverity.LOW,
-                        section=IssueSection.GENERAL,
-                        message=f"Unmapped content: \"{preview}\"",
-                        details="This content doesn't clearly map to standard resume sections (experience, education, skills). ATS systems may skip or misclassify it. Ensure important information is in clearly labeled sections.",
-                        block=block
-                    ))
+            # Check length threshold (80 chars)
+            if len(text_lower) <= 80:
+                skipped_length += 1
+                continue
+            
+            # Check if content is in a clearly labeled section (experience, education, etc.)
+            # If it's in a recognized section, it's less likely to be truly unmapped
+            is_in_labeled_section = self._is_in_labeled_section(blocks, idx)
+            
+            # Check if content is mapped
+            is_mapped = self._is_content_mapped(text_lower, parsed_fragments, is_in_labeled_section)
+            if is_mapped:
+                skipped_mapped += 1
+                continue
+            
+            # If content is in a labeled section but not mapped, it's less critical
+            # (ATS might have extracted it but in a different format)
+            if is_in_labeled_section:
+                skipped_mapped += 1
+                continue
+            
+            # Check if it's a common section header or metadata
+            is_header = self._is_section_header_or_metadata(text_lower)
+            if is_header:
+                skipped_header += 1
+                continue
+            
+            # Only flag body content (not headers/footers/sidebars)
+            if block_region != "body":
+                skipped_region += 1
+                continue
+            
+            # Additional check: skip if it looks like a job description bullet
+            looks_like_bullet = self._looks_like_experience_bullet(text_lower)
+            if looks_like_bullet:
+                skipped_bullet += 1
+                continue
+            
+            # Create a preview of the content (first 60 chars)
+            preview = text_original[:60]
+            if len(text_original) > 60:
+                preview += "..."
+            
+            unmapped_count += 1
+            issues.append(self._create_issue(
+                code="unmapped_content",
+                severity=IssueSeverity.LOW,
+                section=IssueSection.GENERAL,
+                message=f"Unmapped content: \"{preview}\"",
+                details="This content doesn't clearly map to standard resume sections (experience, education, skills). ATS systems may skip or misclassify it. Ensure important information is in clearly labeled sections.",
+                block=block
+            ))
         
         return issues
     
@@ -974,7 +1008,7 @@ class ATSIssueDetector:
         
         # Contact info
         contact_info = parsed_data.get("contact_info", {}) or {}
-        for key in ["email", "phone", "name", "linkedin"]:
+        for key in ["email", "phone", "name"]:
             val = contact_info.get(key) or parsed_data.get(key)
             if val:
                 fragments.add(str(val).lower())
@@ -1017,44 +1051,137 @@ class ATSIssueDetector:
         
         return fragments
     
-    def _is_content_mapped(self, text: str, fragments: Set[str]) -> bool:
-        """Check if content is represented in parsed fragments"""
+    def _is_content_mapped(self, text: str, fragments: Set[str], is_in_labeled_section: bool = False) -> bool:
+        """
+        Check if content is represented in parsed fragments.
+        
+        Uses balanced matching:
+        - For content in labeled sections: 60%+ overlap (more lenient)
+        - For other content: 70%+ overlap (stricter)
+        - Prefers exact or near-exact matches
+        - Only matches if content is clearly represented in parsed data
+        """
         # Clean text more aggressively
         clean_text = text.replace('•', '').replace('-', '').replace('*', '').replace('\n', ' ').strip()
         clean_text = ' '.join(clean_text.split())  # Normalize whitespace
         
-        # Check substring matches (both directions)
+        if len(clean_text) < 10:
+            return False  # Too short to meaningfully match
+        
+        # Common stop words to ignore
+        common_words = {
+            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 
+            'of', 'with', 'by', 'as', 'is', 'was', 'be', 'been', 'have', 'has',
+            'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may',
+            'might', 'can', 'this', 'that', 'these', 'those', 'i', 'you', 'he',
+            'she', 'it', 'we', 'they', 'am', 'are', 'were'
+        }
+        
+        # Extract significant words from the text (4+ chars, not stop words)
+        text_words = set(w.lower().strip('.,;:!?()[]{}') for w in clean_text.split() 
+                        if len(w.strip('.,;:!?()[]{}')) >= 4 and w.lower().strip('.,;:!?()[]{}') not in common_words)
+        
+        if not text_words:
+            # If no significant words, check for exact substring matches only
+            for fragment in fragments:
+                if len(fragment) >= 20:  # Only check substantial fragments
+                    clean_fragment = fragment.replace('\n', ' ').strip()
+                    clean_fragment = ' '.join(clean_fragment.split())
+                    # Exact or near-exact match required
+                    if len(clean_fragment) >= len(clean_text) * 0.8:
+                        if clean_fragment in clean_text or clean_text in clean_fragment:
+                            return True
+            return False
+        
+        # Check each fragment for substantial overlap
+        best_match_ratio = 0.0
         for fragment in fragments:
-            if len(fragment) < 5:
+            if len(fragment) < 10:
                 continue
             
             clean_fragment = fragment.replace('\n', ' ').strip()
             clean_fragment = ' '.join(clean_fragment.split())
             
-            # Direct substring match
-            if clean_fragment in clean_text or clean_text in clean_fragment:
+            # Extract significant words from fragment
+            fragment_words = set(w.lower().strip('.,;:!?()[]{}') for w in clean_fragment.split() 
+                               if len(w.strip('.,;:!?()[]{}')) >= 4 and w.lower().strip('.,;:!?()[]{}') not in common_words)
+            
+            if not fragment_words:
+                # If fragment has no significant words, check for exact substring match
+                if len(clean_fragment) >= 20 and (clean_fragment in clean_text or clean_text in clean_fragment):
+                    return True
+                continue
+            
+            # Calculate word overlap
+            overlap = text_words & fragment_words
+            if not overlap:
+                continue
+            
+            # Calculate overlap ratio (how much of the text is covered by the fragment)
+            overlap_ratio = len(overlap) / len(text_words) if text_words else 0
+            
+            # Also check reverse ratio (how much of fragment is in text)
+            fragment_coverage = len(overlap) / len(fragment_words) if fragment_words else 0
+            
+            # Require substantial overlap: 
+            # - For content in labeled sections: 60%+ (more lenient since ATS may have extracted it differently)
+            # - For other content: 70%+ (stricter)
+            threshold = 0.6 if is_in_labeled_section else 0.7
+            
+            if overlap_ratio >= threshold:
+                return True
+            if overlap_ratio >= (threshold - 0.1) and fragment_coverage >= 0.5 and len(overlap) >= 5:
                 return True
             
-            # Check if they share a significant portion (50%+)
-            if len(clean_fragment) > 20 and len(clean_text) > 20:
-                if clean_fragment[:len(clean_fragment)//2] in clean_text:
-                    return True
-                if clean_text[:len(clean_text)//2] in clean_fragment:
+            # Track best match for debugging
+            if overlap_ratio > best_match_ratio:
+                best_match_ratio = overlap_ratio
+            
+            # For very long fragments (like full descriptions), check if text is a substantial substring
+            if len(clean_fragment) >= 50 and len(clean_text) >= 30:
+                # Check if text appears as a substantial portion of fragment
+                if clean_text in clean_fragment:
+                    # Verify it's not just a small part
+                    if len(clean_text) >= len(clean_fragment) * 0.4:
+                        return True
+        
+        # If we have a good match with at least 4 words, consider it mapped
+        # Threshold depends on whether content is in a labeled section
+        min_ratio = 0.55 if is_in_labeled_section else 0.6
+        if best_match_ratio >= min_ratio and len(text_words) >= 4:
+            # Additional check: ensure we matched at least 4 significant words
+            for fragment in fragments:
+                clean_fragment = fragment.replace('\n', ' ').strip()
+                fragment_words = set(w.lower().strip('.,;:!?()[]{}') for w in clean_fragment.split() 
+                                   if len(w.strip('.,;:!?()[]{}')) >= 4 and w.lower().strip('.,;:!?()[]{}') not in common_words)
+                overlap = text_words & fragment_words
+                if len(overlap) >= 4:
                     return True
         
-        # Check word overlap for fragmented content
-        if len(clean_text) > 15:
-            common_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'as', 'is', 'was', 'be'}
-            text_words = set(w.lower() for w in clean_text.split() if len(w) > 3 and w.lower() not in common_words)
-            
-            for fragment in fragments:
-                if len(fragment) > 15:
-                    fragment_words = set(w.lower() for w in fragment.split() if len(w) > 3 and w.lower() not in common_words)
-                    if text_words and fragment_words:
-                        overlap = len(text_words & fragment_words)
-                        overlap_ratio = overlap / len(text_words) if text_words else 0
-                        # More lenient: 3+ words OR 30%+ overlap
-                        if overlap >= 3 or overlap_ratio > 0.3:
+        return False
+    
+    def _is_in_labeled_section(self, blocks: List[Dict[str, Any]], block_idx: int) -> bool:
+        """
+        Check if a block is within a clearly labeled section (Experience, Education, etc.)
+        by looking backwards for section headers.
+        """
+        # Look backwards up to 3 blocks for a section header
+        section_headers = [
+            'experience', 'work experience', 'employment', 'work history', 'professional experience',
+            'education', 'academic', 'qualifications',
+            'skills', 'technical skills', 'core competencies', 'technologies',
+            'projects', 'certifications', 'awards', 'achievements',
+            'summary', 'objective', 'profile'
+        ]
+        
+        # Check current block and previous 3 blocks
+        for i in range(max(0, block_idx - 3), block_idx + 1):
+            if i < len(blocks):
+                block_text = blocks[i].get("text", "").lower().strip()
+                # Check if it's a short line that looks like a section header
+                if len(block_text) < 50:  # Section headers are usually short
+                    for header in section_headers:
+                        if header in block_text:
                             return True
         
         return False

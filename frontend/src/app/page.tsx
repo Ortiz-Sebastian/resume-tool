@@ -232,7 +232,7 @@ export default function Home() {
                     </div>
 
                     {/* Format Issues Section */}
-                    {scoreData?.highlights && scoreData.highlights.length > 0 ? (
+                    {scoreData?.issue_summary ? (
                       <div>
                         <h2 className="text-xl font-semibold text-gray-900 mb-4">Format Issues & Highlights</h2>
                         <div className="grid lg:grid-cols-3 gap-6">
@@ -240,7 +240,7 @@ export default function Home() {
                           <div className="lg:col-span-2">
                             <PDFHighlightViewer
                               pdfUrl={`http://localhost:8000/api/resume/${resumeId}/file`}
-                              highlights={scoreData.highlights}
+                              highlights={scoreData.highlights || []}
                               resumeId={resumeId}
                             />
                           </div>

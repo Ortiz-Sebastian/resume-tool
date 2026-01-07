@@ -100,18 +100,49 @@ def parse_resume_task(resume_id: int, file_path: str, file_type: str):
     
     db = SessionLocal()
     try:
+        print(f"[PARSE TASK] Starting parse for resume {resume_id}")
         parser = ResumeParser()
         parsed_data = parser.parse(file_path, file_type)
         
+        print(f"[PARSE TASK] Parse completed. Data keys: {list(parsed_data.keys()) if isinstance(parsed_data, dict) else 'Not a dict'}")
+        print(f"[PARSE TASK] Parsed data type: {type(parsed_data)}")
+        
         resume = db.query(Resume).filter(Resume.id == resume_id).first()
         if resume:
-            resume.parsed_data = parsed_data
-            db.commit()
+            # Ensure data is JSON-serializable
+            import json
+            try:
+                # Test if data is JSON-serializable
+                json.dumps(parsed_data)
+                resume.parsed_data = parsed_data
+                db.commit()
+                db.refresh(resume)
+                print(f"[PARSE TASK] Saved parsed_data to resume {resume_id}. Has data: {resume.parsed_data is not None}")
+                if resume.parsed_data:
+                    print(f"[PARSE TASK] Saved data keys: {list(resume.parsed_data.keys()) if isinstance(resume.parsed_data, dict) else 'Not a dict'}")
+            except (TypeError, ValueError) as json_error:
+                print(f"[PARSE TASK] ERROR: Data is not JSON-serializable: {str(json_error)}")
+                print(f"[PARSE TASK] Problematic data type: {type(parsed_data)}")
+                raise Exception(f"Parsed data is not JSON-serializable: {str(json_error)}")
+        else:
+            print(f"[PARSE TASK] ERROR: Resume {resume_id} not found in database")
     except Exception as e:
-        print(f"Error parsing resume {resume_id}: {str(e)}")
+        print(f"[PARSE TASK] ERROR parsing resume {resume_id}: {str(e)}")
+        print(f"[PARSE TASK] Error type: {type(e).__name__}")
         traceback.print_exc()
         db.rollback()
     finally:
+        print(f"[PARSE TASK] Task finished for resume {resume_id} (checking if data was saved...)")
+        # Verify if data was actually saved
+        try:
+            check_resume = db.query(Resume).filter(Resume.id == resume_id).first()
+            if check_resume:
+                has_data = check_resume.parsed_data is not None
+                print(f"[PARSE TASK] Final check - Resume {resume_id} has parsed_data: {has_data}")
+            else:
+                print(f"[PARSE TASK] Final check - Resume {resume_id} not found!")
+        except Exception as check_error:
+            print(f"[PARSE TASK] Error checking final state: {str(check_error)}")
         db.close()
 
 
@@ -125,7 +156,12 @@ async def get_parsed_resume(resume_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Resume not found")
     
     if not resume.parsed_data:
-        raise HTTPException(status_code=400, detail="Resume not yet parsed")
+        # Return 202 Accepted to indicate parsing is in progress
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=202,
+            content={"status": "parsing", "message": "Resume is being parsed. Please retry in a few seconds."}
+        )
     
     return {
         "resume_id": resume.id,
@@ -164,7 +200,12 @@ async def score_resume(resume_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Resume not found")
     
     if not resume.parsed_data:
-        raise HTTPException(status_code=400, detail="Resume must be parsed first")
+        # Return 202 Accepted to indicate parsing is in progress
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=202,
+            content={"status": "parsing", "message": "Resume is being parsed. Please retry in a few seconds."}
+        )
     
     # Score the resume (pass file_type for ATS issue detection)
     scorer = ResumeScorer()

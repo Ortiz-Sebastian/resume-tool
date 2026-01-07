@@ -105,7 +105,6 @@ class ATSIssue:
             # Contact issues
             "contact_email_in_header_footer": "Move email address from header/footer to main body under your name",
             "contact_phone_in_header_footer": "Move phone number from header/footer to main body under your name",
-            "contact_linkedin_not_extracted": "Display LinkedIn URL as plain text, not just as an icon",
             "contact_missing": "Add contact information (email and phone) in the main body under your name",
             
             # Skills issues

@@ -57,16 +57,42 @@ class ResumeScorer:
         )
         
         # ALL issue detection now happens in ats_issue_detector.py (single source of truth)
-        issue_detection = self.issue_detector.detect_issues(
-            file_path,
-            file_type,
-            parsed_data,
-            ats_diagnostics  # Pass diagnostics for comprehensive detection
-        )
+        try:
+            issue_detection = self.issue_detector.detect_issues(
+                file_path,
+                file_type,
+                parsed_data,
+                ats_diagnostics  # Pass diagnostics for comprehensive detection
+            )
+        except Exception as e:
+            # If issue detection fails, return empty result but don't crash scoring
+            print(f"[SCORER ERROR] Issue detection failed: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            issue_detection = {
+                "highlights": [],
+                "summary": {
+                    "total_issues": 0,
+                    "critical": 0,
+                    "high": 0,
+                    "medium": 0,
+                    "low": 0
+                },
+                "recommendations": [],
+                "issues": []
+            }
         
         # Extract issues and recommendations from the unified detector
         issues = issue_detection.get("issues", [])
         recommendations = issue_detection.get("recommendations", [])
+        highlights = issue_detection.get("highlights", [])
+        summary = issue_detection.get("summary", {
+            "total_issues": 0,
+            "critical": 0,
+            "high": 0,
+            "medium": 0,
+            "low": 0
+        })
         
         return {
             "overall_score": round(overall_score, 2),
@@ -78,8 +104,8 @@ class ResumeScorer:
             "issues": issues,  # From unified detector
             "suggestions": recommendations,  # Legacy field
             "recommendations": recommendations,  # Tier 1: Quick fixes
-            "highlights": issue_detection["highlights"],
-            "issue_summary": issue_detection["summary"]
+            "highlights": highlights,
+            "issue_summary": summary
         }
     
     def _score_formatting(self, parsed_data: Dict[str, Any], ats_diagnostics: Dict[str, Any]) -> float:

@@ -20,16 +20,52 @@ export function ScoreCard({ resumeId, onScoreReceived }: ScoreCardProps) {
     fetchScore()
   }, [resumeId])
 
-  const fetchScore = async () => {
+  const fetchScore = async (retryCount = 0) => {
+    const maxRetries = 30 // 30 retries = ~60 seconds max wait time
+    const retryDelay = 2000 // 2 seconds between retries
+    
     try {
-      setLoading(true)
+      if (retryCount === 0) {
+        setLoading(true)
+      }
       const response = await axios.post(`${API_URL}/api/score/${resumeId}`)
+      
+      // Check if we got a 202 (parsing in progress)
+      if (response.status === 202) {
+        if (retryCount < maxRetries) {
+          // Wait and retry
+          setTimeout(() => {
+            fetchScore(retryCount + 1)
+          }, retryDelay)
+          return
+        } else {
+          setError('Parsing is taking longer than expected. Please refresh the page.')
+          setLoading(false)
+          return
+        }
+      }
+      
+      // Success - data is ready
       setScoreData(response.data)
       onScoreReceived(response.data)
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to calculate score')
-    } finally {
+      setError('')
       setLoading(false)
+    } catch (err: any) {
+      // Check if it's a 202 status (parsing in progress)
+      if (err.response?.status === 202) {
+        if (retryCount < maxRetries) {
+          setTimeout(() => {
+            fetchScore(retryCount + 1)
+          }, retryDelay)
+          return
+        } else {
+          setError('Parsing is taking longer than expected. Please refresh the page.')
+          setLoading(false)
+        }
+      } else {
+        setError(err.response?.data?.detail || 'Failed to calculate score')
+        setLoading(false)
+      }
     }
   }
 

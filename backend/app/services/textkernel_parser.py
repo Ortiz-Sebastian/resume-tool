@@ -27,17 +27,20 @@ class TextkernelParser(BaseResumeParser):
     
     def __init__(self):
         # Use AFFINDA_API_KEY (primary) or fallback to textkernel_api_key for backward compatibility
-        self.api_key = os.getenv("AFFINDA_API_KEY")
-        self.workspace_id = "UOflOxzq"
+        api_key_raw = os.getenv("AFFINDA_API_KEY")
+        # Strip whitespace in case there's any
+        self.api_key = api_key_raw.strip() if api_key_raw else None
+        self.workspace_id = "gThVEtSq"
         self.timeout = 30.0
-        self.document_type = "uXPuttKu"
+        self.document_type = "wbTlWoen"
         # Debug logging
         if not self.api_key:
-            print("[AFFINDA DEBUG] API key not found. Checked: AFFINDA_API_KEY env var and settings.textkernel_api_key")
+            print("[AFFINDA DEBUG] API key not found. Checked: AFFINDA_API_KEY env var")
         if not self.workspace_id:
             print("[AFFINDA DEBUG] Workspace ID not found. Checked: AFFINDA_WORKSPACE_ID env var and settings.affinda_workspace_id")
         if self.api_key and self.workspace_id:
-            print(f"[AFFINDA DEBUG] API key found: {'*' * (len(self.api_key) - 4) + self.api_key[-4:]}, Workspace ID: {self.workspace_id[:10]}...")
+            api_key_preview = f"{self.api_key[:8]}...{self.api_key[-4:]}" if len(self.api_key) > 12 else "***"
+            print(f"[AFFINDA DEBUG] API key found (length: {len(self.api_key)}): {api_key_preview}, Workspace ID: {self.workspace_id[:10]}...")
     
     def get_parser_name(self) -> str:
         return "Affinda"
@@ -72,9 +75,16 @@ class TextkernelParser(BaseResumeParser):
             raise ValueError("AFFINDA_WORKSPACE_ID not configured. Set AFFINDA_WORKSPACE_ID in .env file.")
         
         # Use the documents endpoint as per Affinda documentation
-        url = "https://api.affinda.com/v3/documents"
-        headers = {"Authorization": f"Bearer {self.api_key}"}
-
+        url = "https://api.us1.affinda.com/v3/documents"
+        
+        # Verify API key is set and format header correctly
+        if not self.api_key:
+            raise ValueError("AFFINDA_API_KEY is not set or is empty")
+        
+        # Strip any whitespace and create authorization header
+        api_key_clean = self.api_key.strip()
+        headers = {"Authorization": f"Bearer {api_key_clean}"}
+        # Note: Don't set Content-Type for multipart/form-data - requests library sets it automatically with boundary
         # Upload the document - file must be opened during the request
         with open(file_path, "rb") as f:
             file_path_obj = Path(file_path)
@@ -188,65 +198,25 @@ class TextkernelParser(BaseResumeParser):
                 if get_response.status_code == 200:
                     doc_response = get_response.json()
                     resume_data_check = doc_response.get("data", {})
-                    print(f"[AFFINDA DEBUG] Attempt {i+1}: Data keys: {list(resume_data_check.keys()) if isinstance(resume_data_check, dict) else 'Not a dict'}")
                     if resume_data_check and isinstance(resume_data_check, dict) and len(resume_data_check) > 0:
-                        print(f"[AFFINDA DEBUG] Data populated after {2*(i+1)}s")
                         break
-            print(f"[AFFINDA DEBUG] Final document fetch completed")
         
         # Extract the resume data from the JSON response
         # The resume data should be in the 'data' field
         resume_data = doc_response.get("data", {})
         meta = doc_response.get("meta", {})
         
-        print(f"[AFFINDA DEBUG] === FINAL DOCUMENT STATUS ===")
-        print(f"[AFFINDA DEBUG] - ready: {meta.get('ready', 'N/A')}")
-        print(f"[AFFINDA DEBUG] - failed: {meta.get('failed', 'N/A')}")
-        print(f"[AFFINDA DEBUG] - extractor: {doc_response.get('extractor', 'N/A')}")
-        print(f"[AFFINDA DEBUG] - documentType: {meta.get('documentType', 'N/A')}")
-        print(f"[AFFINDA DEBUG] - isRejected: {meta.get('isRejected', 'N/A')}")
-        print(f"[AFFINDA DEBUG] - isConfirmed: {meta.get('isConfirmed', 'N/A')}")
-        print(f"[AFFINDA DEBUG] - isArchived: {meta.get('isArchived', 'N/A')}")
-        print(f"[AFFINDA DEBUG] - errorCode: {meta.get('errorCode', 'N/A')}")
-        print(f"[AFFINDA DEBUG] - errorDetail: {meta.get('errorDetail', 'N/A')}")
-        print(f"[AFFINDA DEBUG] - error (top level): {doc_response.get('error', 'N/A')}")
-        print(f"[AFFINDA DEBUG] - warnings: {doc_response.get('warnings', 'N/A')}")
-        print(f"[AFFINDA DEBUG] - Data type: {type(resume_data)}")
-        print(f"[AFFINDA DEBUG] - Data keys: {list(resume_data.keys()) if isinstance(resume_data, dict) else 'Not a dict'}")
-        print(f"[AFFINDA DEBUG] - Data keys count: {len(resume_data.keys()) if isinstance(resume_data, dict) else 0}")
-        print(f"[AFFINDA DEBUG] ===============================")
-        
         # Check if data is empty but maybe the resume data is nested differently
         if not resume_data or (isinstance(resume_data, dict) and len(resume_data) == 0):
-            # Try to see if there's any data elsewhere in the response
-            print(f"[AFFINDA DEBUG] Data field is empty, checking full response structure...")
-            print(f"[AFFINDA DEBUG] Full doc_response (first 2000 chars): {str(doc_response)[:2000]}")
-            
             # Check if maybe the resume data is directly in the response (not nested in 'data')
-            # Some API versions might return it differently
             if any(key in doc_response for key in ['name', 'emails', 'workExperience', 'work_experience', 'education']):
-                print(f"[AFFINDA DEBUG] Found resume fields at top level, using entire response as resume_data")
                 resume_data = doc_response
             else:
-                # Final diagnostic before raising error
-                print(f"[AFFINDA DEBUG] === DIAGNOSTIC INFO (Data Empty) ===")
-                print(f"[AFFINDA DEBUG] - extractor: {doc_response.get('extractor', 'EMPTY/MISSING')}")
-                print(f"[AFFINDA DEBUG] - documentType: {meta.get('documentType', 'EMPTY/MISSING')}")
-                print(f"[AFFINDA DEBUG] - failed: {meta.get('failed', False)}")
-                print(f"[AFFINDA DEBUG] - isRejected: {meta.get('isRejected', False)}")
-                print(f"[AFFINDA DEBUG] - errorCode: {meta.get('errorCode', 'NONE')}")
-                print(f"[AFFINDA DEBUG] - errorDetail: {meta.get('errorDetail', 'NONE')}")
-                print(f"[AFFINDA DEBUG] - ready: {meta.get('ready', False)}")
-                print(f"[AFFINDA DEBUG] - readyDt: {meta.get('readyDt', 'N/A')}")
-                print(f"[AFFINDA DEBUG] - Top level error: {doc_response.get('error', 'NONE')}")
-                print(f"[AFFINDA DEBUG] - Warnings: {doc_response.get('warnings', [])}")
-                print(f"[AFFINDA DEBUG] =====================================")
                 raise Exception(f"Document processed but no resume data available. Extractor: {doc_response.get('extractor', 'EMPTY')}, DocumentType: {meta.get('documentType', 'EMPTY')}, Failed: {meta.get('failed', False)}, IsRejected: {meta.get('isRejected', False)}")
         
         # Convert Affinda JSON response to our standard format
         try:
             result = self._convert_affinda_json_response(resume_data)
-            print(f"[AFFINDA DEBUG] Conversion successful, keys: {list(result.keys())}")
             return result
         except Exception as e:
             print(f"[AFFINDA ERROR] Failed to convert response: {str(e)}")
@@ -257,35 +227,111 @@ class TextkernelParser(BaseResumeParser):
     def _convert_affinda_json_response(self, resume_data: Dict[str, Any]) -> Dict[str, Any]:
         """Convert Affinda JSON response (dict) to our standard format"""
         
-        # Extract name
+        # Extract name - Affinda uses "candidateName" with nested structure
         name = ""
-        name_obj = resume_data.get("name")
+        name_obj = resume_data.get("candidateName") or resume_data.get("name")
         if name_obj:
             if isinstance(name_obj, dict):
-                first = name_obj.get("first", "")
-                last = name_obj.get("last", "")
-                name = f"{first} {last}".strip()
+                # Affinda returns: {"raw": "SEBASTIAN ORTIZ", "parsed": {"firstName": {...}, "familyName": {...}}}
+                # Try raw field first (simplest)
+                if name_obj.get("raw"):
+                    name = str(name_obj.get("raw")).strip()
+                else:
+                    # Try parsed structure
+                    parsed_name = name_obj.get("parsed", {})
+                    if isinstance(parsed_name, dict):
+                        first = ""
+                        last = ""
+                        # Check for firstName (could be nested)
+                        first_obj = parsed_name.get("firstName", {})
+                        if isinstance(first_obj, dict):
+                            first = first_obj.get("raw", "") or first_obj.get("parsed", "") or ""
+                        else:
+                            first = str(first_obj) if first_obj else ""
+                        
+                        # Check for familyName (could be nested)
+                        last_obj = parsed_name.get("familyName", {})
+                        if isinstance(last_obj, dict):
+                            last = last_obj.get("raw", "") or last_obj.get("parsed", "") or ""
+                        else:
+                            last = str(last_obj) if last_obj else ""
+                        
+                        if first or last:
+                            name = f"{first} {last}".strip()
             else:
-                name = str(name_obj)
+                name = str(name_obj).strip()
         
-        # Extract contact info
+        # If name is still empty, try to extract from rawText
+        if not name and resume_data.get("rawText"):
+            raw_text_lines = resume_data.get("rawText", "").split("\n")
+            if raw_text_lines:
+                # First line often contains the name
+                potential_name = raw_text_lines[0].strip()
+                # Basic check: if it looks like a name (2-4 words, mostly letters)
+                if potential_name and len(potential_name.split()) <= 4 and potential_name.replace(" ", "").replace("-", "").isalpha():
+                    name = potential_name
+        
+        # Extract contact info - Affinda may return "email" (string, list, or array) or "emails" (array)
         email = ""
-        emails = resume_data.get("emails", [])
-        if emails and len(emails) > 0:
-            email_obj = emails[0]
-            if isinstance(email_obj, dict):
-                email = email_obj.get("value", "")
+        email_field = resume_data.get("email")
+        if email_field:
+            # If it's a list/array, extract the first item
+            if isinstance(email_field, list) and len(email_field) > 0:
+                email_obj = email_field[0]
+                if isinstance(email_obj, dict):
+                    # Try common fields for email value
+                    email = email_obj.get("value", "") or email_obj.get("raw", "") or email_obj.get("parsed", "")
+                else:
+                    email = str(email_obj)
+            # If it's already a string, use it directly
+            elif isinstance(email_field, str):
+                email = email_field
             else:
-                email = str(email_obj)
+                email = str(email_field)
+        else:
+            # Try emails array
+            emails = resume_data.get("emails", [])
+            if emails and len(emails) > 0:
+                email_obj = emails[0]
+                if isinstance(email_obj, dict):
+                    email = email_obj.get("value", "") or email_obj.get("raw", "")
+                else:
+                    email = str(email_obj)
         
+        # Extract phone - Affinda uses "phoneNumber" (string, list, or array) or "phoneNumbers" (array)
         phone = ""
-        phone_numbers = resume_data.get("phoneNumbers", []) or resume_data.get("phone_numbers", [])
-        if phone_numbers and len(phone_numbers) > 0:
-            phone_obj = phone_numbers[0]
-            if isinstance(phone_obj, dict):
-                phone = phone_obj.get("value", "")
+        phone_field = resume_data.get("phoneNumber") or resume_data.get("phone")
+        if phone_field:
+            # If it's a list/array, extract the first item
+            if isinstance(phone_field, list) and len(phone_field) > 0:
+                phone_obj = phone_field[0]
+                if isinstance(phone_obj, dict):
+                    # Try common fields for phone value
+                    parsed_phone = phone_obj.get("parsed", {})
+                    if isinstance(parsed_phone, dict):
+                        phone = parsed_phone.get("formattedNumber", "") or parsed_phone.get("nationalNumber", "") or parsed_phone.get("rawText", "")
+                    else:
+                        phone = phone_obj.get("value", "") or phone_obj.get("raw", "") or str(parsed_phone)
+                else:
+                    phone = str(phone_obj)
+            # If it's already a string, use it directly
+            elif isinstance(phone_field, str):
+                phone = phone_field
             else:
-                phone = str(phone_obj)
+                phone = str(phone_field)
+        else:
+            # Try phoneNumbers array
+            phone_numbers = resume_data.get("phoneNumbers", []) or resume_data.get("phone_numbers", [])
+            if phone_numbers and len(phone_numbers) > 0:
+                phone_obj = phone_numbers[0]
+                if isinstance(phone_obj, dict):
+                    parsed_phone = phone_obj.get("parsed", {})
+                    if isinstance(parsed_phone, dict):
+                        phone = parsed_phone.get("formattedNumber", "") or parsed_phone.get("nationalNumber", "")
+                    else:
+                        phone = phone_obj.get("value", "") or phone_obj.get("raw", "")
+                else:
+                    phone = str(phone_obj)
         
         # Extract location
         location_parts = []
@@ -306,45 +352,202 @@ class TextkernelParser(BaseResumeParser):
         experience = []
         work_experience = resume_data.get("workExperience", []) or resume_data.get("work_experience", [])
         if work_experience:
-            for position in work_experience:
+            for idx, position in enumerate(work_experience):
                 if isinstance(position, dict):
-                    exp_entry = {
-                        "title": position.get("jobTitle", "") or position.get("job_title", ""),
-                        "company": position.get("organization", "") or position.get("company", ""),
-                        "start_date": self._format_date_from_json(position.get("startDate")) or position.get("start_date", ""),
-                        "end_date": self._format_date_from_json(position.get("endDate")) or position.get("end_date", ""),
-                        "location": position.get("location", {}).get("city", "") if isinstance(position.get("location"), dict) else "",
-                        "description": position.get("description", ""),
-                        "highlights": position.get("achievements", []) or position.get("highlights", [])
-                    }
+                    # Affinda returns experience entries with 'raw' and 'parsed' fields
+                    # The actual data is in the 'parsed' field
+                    parsed_exp = position.get("parsed", {})
+                    if not parsed_exp and position.get("raw"):
+                        # If no parsed field, try to use raw as fallback
+                        parsed_exp = {}
+                    
+                    # Extract from parsed field (the actual structured data)
+                    # Affinda uses prefixed field names: workExperienceJobTitle, workExperienceOrganization, etc.
+                    if isinstance(parsed_exp, dict):
+                        # Job title - Affinda uses workExperienceJobTitle
+                        job_title_obj = (parsed_exp.get("workExperienceJobTitle") or 
+                                        parsed_exp.get("jobTitle") or 
+                                        parsed_exp.get("job_title") or 
+                                        parsed_exp.get("title"))
+                        if isinstance(job_title_obj, dict):
+                            job_title = job_title_obj.get("raw", "") or job_title_obj.get("parsed", "") or ""
+                        else:
+                            job_title = str(job_title_obj) if job_title_obj else ""
+                        
+                        # Company/Organization - Affinda uses workExperienceOrganization
+                        company_obj = (parsed_exp.get("workExperienceOrganization") or 
+                                      parsed_exp.get("organization") or 
+                                      parsed_exp.get("company") or 
+                                      parsed_exp.get("employer"))
+                        if isinstance(company_obj, dict):
+                            company = company_obj.get("raw", "") or company_obj.get("parsed", "") or ""
+                        else:
+                            company = str(company_obj) if company_obj else ""
+                        
+                        # Dates - Affinda uses workExperienceDates
+                        dates_obj = parsed_exp.get("workExperienceDates")
+                        if dates_obj:
+                            if isinstance(dates_obj, dict):
+                                start_date = self._format_date_from_json(dates_obj.get("startDate")) or self._format_date_from_json(dates_obj.get("start_date"))
+                                end_date = self._format_date_from_json(dates_obj.get("endDate")) or self._format_date_from_json(dates_obj.get("end_date"))
+                            else:
+                                # Try direct fields
+                                start_date = self._format_date_from_json(parsed_exp.get("startDate")) or self._format_date_from_json(parsed_exp.get("start_date"))
+                                end_date = self._format_date_from_json(parsed_exp.get("endDate")) or self._format_date_from_json(parsed_exp.get("end_date"))
+                        else:
+                            start_date = self._format_date_from_json(parsed_exp.get("startDate")) or self._format_date_from_json(parsed_exp.get("start_date"))
+                            end_date = self._format_date_from_json(parsed_exp.get("endDate")) or self._format_date_from_json(parsed_exp.get("end_date"))
+                        
+                        # Location - Affinda uses workExperienceLocation
+                        location_obj = (parsed_exp.get("workExperienceLocation") or 
+                                       parsed_exp.get("location", {}))
+                        if isinstance(location_obj, dict):
+                            location = location_obj.get("city", "") or location_obj.get("raw", "") or location_obj.get("formatted", "") or ""
+                        else:
+                            location = str(location_obj) if location_obj else ""
+                        
+                        # Description - Affinda uses workExperienceDescription
+                        description_obj = (parsed_exp.get("workExperienceDescription") or 
+                                          parsed_exp.get("description") or 
+                                          parsed_exp.get("summary"))
+                        if isinstance(description_obj, dict):
+                            description = description_obj.get("raw", "") or description_obj.get("parsed", "") or ""
+                        else:
+                            description = str(description_obj) if description_obj else ""
+                        
+                        # Achievements/Highlights - might be in description or separate
+                        achievements = (parsed_exp.get("achievements", []) or 
+                                        parsed_exp.get("highlights", []) or 
+                                        parsed_exp.get("responsibilities", []))
+                        # Handle if achievements is a list of objects
+                        if achievements and len(achievements) > 0 and isinstance(achievements[0], dict):
+                            achievements = [a.get("raw", "") or a.get("parsed", "") or str(a) for a in achievements if a]
+                        
+                        exp_entry = {
+                            "title": job_title.strip() if job_title else "",
+                            "company": company.strip() if company else "",
+                            "start_date": start_date or "",
+                            "end_date": end_date or "",
+                            "location": location.strip() if location else "",
+                            "description": description.strip() if description else "",
+                            "highlights": achievements if isinstance(achievements, list) else []
+                        }
+                    else:
+                        # Fallback: create empty entry
+                        exp_entry = {
+                            "title": "",
+                            "company": "",
+                            "start_date": "",
+                            "end_date": "",
+                            "location": "",
+                            "description": "",
+                            "highlights": []
+                        }
+                    
                     experience.append(exp_entry)
         
         # Extract education
         education = []
         education_list = resume_data.get("education", [])
         if education_list:
-            for degree in education_list:
+            for idx, degree in enumerate(education_list):
                 if isinstance(degree, dict):
-                    edu_entry = {
-                        "degree": degree.get("degree", ""),
-                        "institution": degree.get("organization", "") or degree.get("institution", ""),
-                        "graduation_date": self._format_date_from_json(degree.get("endDate")) or degree.get("graduation_date", ""),
-                        "gpa": degree.get("gpa", ""),
-                        "major": degree.get("major", "")
-                    }
+                    # Affinda returns education entries with 'raw' and 'parsed' fields
+                    # The actual data is in the 'parsed' field
+                    parsed_edu = degree.get("parsed", {})
+                    if not parsed_edu and degree.get("raw"):
+                        # If no parsed field, try to use raw as fallback
+                        parsed_edu = {}
+                    
+                    # Extract from parsed field (the actual structured data)
+                    # Affinda uses prefixed field names: educationAccreditation, educationOrganization, etc.
+                    if isinstance(parsed_edu, dict):
+                        # Degree - Affinda uses educationAccreditation or educationLevel
+                        degree_obj = (parsed_edu.get("educationAccreditation") or 
+                                     parsed_edu.get("educationLevel") or
+                                     parsed_edu.get("degree") or 
+                                     parsed_edu.get("accreditation") or 
+                                     parsed_edu.get("qualification"))
+                        if isinstance(degree_obj, dict):
+                            degree_name = degree_obj.get("raw", "") or degree_obj.get("parsed", "") or ""
+                        else:
+                            degree_name = str(degree_obj) if degree_obj else ""
+                        
+                        # Institution - Affinda uses educationOrganization
+                        institution_obj = (parsed_edu.get("educationOrganization") or 
+                                          parsed_edu.get("organization") or 
+                                          parsed_edu.get("institution") or 
+                                          parsed_edu.get("school") or 
+                                          parsed_edu.get("university"))
+                        if isinstance(institution_obj, dict):
+                            institution = institution_obj.get("raw", "") or institution_obj.get("parsed", "") or ""
+                        else:
+                            institution = str(institution_obj) if institution_obj else ""
+                        
+                        # Dates - Affinda uses educationDates
+                        dates_obj = parsed_edu.get("educationDates")
+                        if dates_obj:
+                            if isinstance(dates_obj, dict):
+                                graduation_date = self._format_date_from_json(dates_obj.get("endDate")) or self._format_date_from_json(dates_obj.get("graduation_date")) or self._format_date_from_json(dates_obj.get("date"))
+                            else:
+                                graduation_date = self._format_date_from_json(parsed_edu.get("endDate")) or self._format_date_from_json(parsed_edu.get("graduation_date")) or self._format_date_from_json(parsed_edu.get("date"))
+                        else:
+                            graduation_date = self._format_date_from_json(parsed_edu.get("endDate")) or self._format_date_from_json(parsed_edu.get("graduation_date")) or self._format_date_from_json(parsed_edu.get("date"))
+                        
+                        # GPA - Affinda uses educationGrade
+                        gpa_obj = (parsed_edu.get("educationGrade") or 
+                                  parsed_edu.get("gpa"))
+                        if isinstance(gpa_obj, dict):
+                            gpa = gpa_obj.get("raw", "") or gpa_obj.get("parsed", "") or ""
+                        else:
+                            gpa = str(gpa_obj) if gpa_obj else ""
+                        
+                        # Major - Affinda uses educationMajor
+                        major_obj = (parsed_edu.get("educationMajor") or 
+                                    parsed_edu.get("major"))
+                        if isinstance(major_obj, dict):
+                            major = major_obj.get("raw", "") or major_obj.get("parsed", "") or ""
+                        else:
+                            major = str(major_obj) if major_obj else ""
+                        
+                        edu_entry = {
+                            "degree": degree_name.strip() if degree_name else "",
+                            "institution": institution.strip() if institution else "",
+                            "graduation_date": graduation_date or "",
+                            "gpa": gpa.strip() if gpa else "",
+                            "major": major.strip() if major else ""
+                        }
+                    else:
+                        # Fallback: create empty entry
+                        edu_entry = {
+                            "degree": "",
+                            "institution": "",
+                            "graduation_date": "",
+                            "gpa": "",
+                            "major": ""
+                        }
+                    
                     education.append(edu_entry)
         
-        # Extract skills
+        # Extract skills - Affinda may use "skill" (singular) or "skills" (plural)
+        # Skills might also be in parsed objects with 'raw' and 'parsed' fields
         skills = []
-        skills_list = resume_data.get("skills", [])
+        skills_list = resume_data.get("skill", []) or resume_data.get("skills", [])
         if skills_list:
             for skill in skills_list:
+                skill_name = ""
                 if isinstance(skill, dict):
-                    skill_name = skill.get("name", "")
+                    # Check if it's a structured object with raw/parsed
+                    if "raw" in skill or "parsed" in skill:
+                        skill_name = skill.get("raw", "") or skill.get("parsed", "") or ""
+                    else:
+                        # Try standard fields
+                        skill_name = skill.get("name", "") or skill.get("value", "") or skill.get("skill", "")
                 else:
                     skill_name = str(skill)
-                if skill_name and skill_name not in skills:
-                    skills.append(skill_name)
+                
+                if skill_name and skill_name.strip() and skill_name not in skills:
+                    skills.append(skill_name.strip())
         
         # Extract certifications
         certifications = []
@@ -359,17 +562,86 @@ class TextkernelParser(BaseResumeParser):
                     }
                     certifications.append(cert_entry)
         
-        # Extract languages
+        # Extract languages - Affinda may use "language" (singular) or "languages" (plural)
         languages = []
-        langs_list = resume_data.get("languages", [])
+        langs_list = resume_data.get("language", []) or resume_data.get("languages", [])
         if langs_list:
             for lang in langs_list:
                 if isinstance(lang, dict):
-                    lang_name = lang.get("name", "")
+                    lang_name = lang.get("name", "") or lang.get("value", "")
                 else:
                     lang_name = str(lang)
                 if lang_name:
                     languages.append(lang_name)
+        
+        # Extract projects
+        projects = []
+        projects_list = resume_data.get("project", []) or resume_data.get("projects", [])
+        if projects_list:
+            for project in projects_list:
+                if isinstance(project, dict):
+                    # Projects might have raw/parsed structure
+                    parsed_proj = project.get("parsed", {})
+                    if isinstance(parsed_proj, dict):
+                        project_name = parsed_proj.get("name", "") or parsed_proj.get("title", "") or project.get("raw", "")
+                        project_desc = parsed_proj.get("description", "") or parsed_proj.get("summary", "")
+                    else:
+                        project_name = project.get("name", "") or project.get("title", "") or project.get("raw", "")
+                        project_desc = project.get("description", "") or project.get("summary", "")
+                    
+                    if project_name or project_desc:
+                        projects.append({
+                            "name": str(project_name).strip() if project_name else "",
+                            "description": str(project_desc).strip() if project_desc else ""
+                        })
+                else:
+                    projects.append({"name": str(project).strip(), "description": ""})
+        
+        # Extract achievements
+        achievements = []
+        achievements_list = resume_data.get("achievement", []) or resume_data.get("achievements", [])
+        if achievements_list:
+            for achievement in achievements_list:
+                if isinstance(achievement, dict):
+                    # Achievements might have raw/parsed structure
+                    parsed_ach = achievement.get("parsed", {})
+                    if isinstance(parsed_ach, dict):
+                        ach_name = parsed_ach.get("name", "") or parsed_ach.get("title", "") or achievement.get("raw", "")
+                        ach_desc = parsed_ach.get("description", "") or parsed_ach.get("summary", "")
+                    else:
+                        ach_name = achievement.get("name", "") or achievement.get("title", "") or achievement.get("raw", "")
+                        ach_desc = achievement.get("description", "") or achievement.get("summary", "")
+                    
+                    if ach_name or ach_desc:
+                        achievements.append({
+                            "name": str(ach_name).strip() if ach_name else "",
+                            "description": str(ach_desc).strip() if ach_desc else ""
+                        })
+                else:
+                    achievements.append({"name": str(achievement).strip(), "description": ""})
+        
+        # Extract associations/extracurriculars
+        associations = []
+        associations_list = resume_data.get("association", []) or resume_data.get("associations", [])
+        if associations_list:
+            for association in associations_list:
+                if isinstance(association, dict):
+                    # Associations might have raw/parsed structure
+                    parsed_assoc = association.get("parsed", {})
+                    if isinstance(parsed_assoc, dict):
+                        assoc_name = parsed_assoc.get("name", "") or parsed_assoc.get("organization", "") or association.get("raw", "")
+                        assoc_role = parsed_assoc.get("role", "") or parsed_assoc.get("position", "")
+                    else:
+                        assoc_name = association.get("name", "") or association.get("organization", "") or association.get("raw", "")
+                        assoc_role = association.get("role", "") or association.get("position", "")
+                    
+                    if assoc_name:
+                        associations.append({
+                            "name": str(assoc_name).strip() if assoc_name else "",
+                            "role": str(assoc_role).strip() if assoc_role else ""
+                        })
+                else:
+                    associations.append({"name": str(association).strip(), "role": ""})
         
         # Get raw text
         raw_text = resume_data.get("rawText", "") or resume_data.get("raw_text", "")
@@ -385,6 +657,9 @@ class TextkernelParser(BaseResumeParser):
             "skills": skills,
             "certifications": certifications,
             "languages": languages,
+            "projects": projects,
+            "achievements": achievements,
+            "associations": associations,
             "raw_text": raw_text,
             "metadata": {
                 "parser": "affinda",

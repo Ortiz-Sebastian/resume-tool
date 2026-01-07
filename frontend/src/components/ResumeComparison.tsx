@@ -25,8 +25,6 @@ const FIELD_WEIGHTS = {
   name: 1.5,        // Critical - always needed
   email: 1.5,       // Critical - primary contact
   phone: 1.0,       // Important
-  linkedin: 0.5,    // Nice to have
-  location: 0.5,    // Nice to have
   skills: 1.5,      // Very important for ATS matching
   experience: 2.0,  // Most important section
   education: 1.0,   // Important
@@ -39,18 +37,67 @@ export function ResumeComparison({ resumeId, scoreData }: ResumeComparisonProps)
   const [activeView, setActiveView] = useState<'side-by-side' | 'extraction'>('side-by-side')
 
   useEffect(() => {
-    fetchParsedData()
+    if (resumeId) {
+      setParsedData(null) // Reset data when resumeId changes
+      setError('')
+      fetchParsedData()
+    }
   }, [resumeId])
 
-  const fetchParsedData = async () => {
+  const fetchParsedData = async (retryCount = 0) => {
+    const maxRetries = 30 // 30 retries = ~60 seconds max wait time
+    const retryDelay = 2000 // 2 seconds between retries
+    
     try {
-      setLoading(true)
+      if (retryCount === 0) {
+        setLoading(true)
+      }
       const response = await axios.get(`${API_URL}/api/resume/${resumeId}/parsed`)
-      setParsedData(response.data.parsed_data)
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to load parsed resume')
-    } finally {
+      
+      // Check if we got a 202 (parsing in progress)
+      if (response.status === 202) {
+        if (retryCount < maxRetries) {
+          // Wait and retry
+          setTimeout(() => {
+            fetchParsedData(retryCount + 1)
+          }, retryDelay)
+          return
+        } else {
+          setError('Parsing is taking longer than expected. Please refresh the page.')
+          setLoading(false)
+          return
+        }
+      }
+      
+      // Success - data is ready
+      const parsedDataFromResponse = response.data.parsed_data
+      
+      if (!parsedDataFromResponse) {
+        setError('No parsed data received from server')
+        setLoading(false)
+        return
+      }
+      
+      setParsedData(parsedDataFromResponse)
+      setError('')
       setLoading(false)
+    } catch (err: any) {
+      // Check if it's a 202 status (parsing in progress)
+      if (err.response?.status === 202) {
+        if (retryCount < maxRetries) {
+          setTimeout(() => {
+            fetchParsedData(retryCount + 1)
+          }, retryDelay)
+          return
+        } else {
+          setError('Parsing is taking longer than expected. Please refresh the page.')
+          setLoading(false)
+        }
+      } else {
+        console.error('[ResumeComparison] Error:', err)
+        setError(err.response?.data?.detail || 'Failed to load parsed resume')
+        setLoading(false)
+      }
     }
   }
 
@@ -87,24 +134,6 @@ export function ResumeComparison({ resumeId, scoreData }: ResumeComparisonProps)
       extractedValue: contact.phone || parsedData.phone || null,
       status: (contact.phone || parsedData.phone) ? 'found' : 'missing',
       weight: FIELD_WEIGHTS.phone
-    })
-
-    statuses.push({
-      field: 'linkedin',
-      label: 'LinkedIn',
-      originalValue: null,
-      extractedValue: contact.linkedin || parsedData.linkedin || null,
-      status: (contact.linkedin || parsedData.linkedin) ? 'found' : 'missing',
-      weight: FIELD_WEIGHTS.linkedin
-    })
-
-    statuses.push({
-      field: 'location',
-      label: 'Location',
-      originalValue: null,
-      extractedValue: contact.location || parsedData.location || null,
-      status: (contact.location || parsedData.location) ? 'found' : 'missing',
-      weight: FIELD_WEIGHTS.location
     })
 
     // Skills
@@ -254,7 +283,7 @@ export function ResumeComparison({ resumeId, scoreData }: ResumeComparisonProps)
           <div className="p-6">
             {/* Weight explanation */}
             <div className="mb-4 p-3 bg-blue-50 rounded-lg text-sm text-blue-800">
-              <strong>Weighted Scoring:</strong> Critical fields (Name, Email, Experience, Skills) count more toward your score than optional fields (LinkedIn, Location).
+              <strong>Weighted Scoring:</strong> Critical fields (Name, Email, Experience, Skills) count more toward your score.
             </div>
             <div className="grid gap-4">
               {extractionStatus.map((item) => (
@@ -333,12 +362,22 @@ export function ResumeComparison({ resumeId, scoreData }: ResumeComparisonProps)
             </div>
             <div className="p-6 h-[600px] overflow-y-auto">
               <div className="prose prose-sm max-w-none">
-                {parsedData?.raw_text ? (
+                {parsedData?.raw_text && parsedData.raw_text.trim().length > 0 ? (
                   <pre className="whitespace-pre-wrap text-sm font-mono text-gray-700 leading-relaxed">
                     {parsedData.raw_text}
                   </pre>
                 ) : (
-                  <p className="text-gray-500">Original text not available</p>
+                  <div className="text-gray-500">
+                    <p>Original text not available</p>
+                    <p className="text-xs mt-2">Debug: parsedData is {parsedData ? 'defined' : 'undefined'}</p>
+                    <p className="text-xs">raw_text is {parsedData?.raw_text ? `defined (type: ${typeof parsedData.raw_text}, length: ${parsedData.raw_text?.length || 0})` : 'undefined'}</p>
+                    <p className="text-xs">Keys: {parsedData ? Object.keys(parsedData).join(', ') : 'N/A'}</p>
+                    {parsedData && (
+                      <pre className="text-xs mt-2 bg-gray-100 p-2 rounded overflow-auto max-h-40">
+                        {JSON.stringify(parsedData, null, 2).substring(0, 500)}
+                      </pre>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
@@ -409,43 +448,21 @@ export function ResumeComparison({ resumeId, scoreData }: ResumeComparisonProps)
                       )}
                     </span>
 
-                    {/* LinkedIn */}
-                    <span className={`px-3 py-1.5 rounded-full text-sm flex items-center gap-1 ${
-                      (parsedData?.contact_info?.linkedin || parsedData?.linkedin)
-                        ? 'bg-green-100 text-green-800 border border-green-200'
-                        : 'bg-yellow-100 text-yellow-800 border border-yellow-200'
-                    }`}>
-                      {(parsedData?.contact_info?.linkedin || parsedData?.linkedin) ? (
-                        <>
-                          <CheckCircle className="h-3 w-3" />
-                          💼 LinkedIn found
-                        </>
-                      ) : (
-                        <>
-                          <AlertTriangle className="h-3 w-3" />
-                          💼 LinkedIn not found
-                        </>
-                      )}
-                    </span>
+                    {/* LinkedIn - only show if found, no warning if missing */}
+                    {(parsedData?.contact_info?.linkedin || parsedData?.linkedin) && (
+                      <span className="px-3 py-1.5 rounded-full text-sm flex items-center gap-1 bg-green-100 text-green-800 border border-green-200">
+                        <CheckCircle className="h-3 w-3" />
+                        💼 LinkedIn found
+                      </span>
+                    )}
 
-                    {/* Location */}
-                    <span className={`px-3 py-1.5 rounded-full text-sm flex items-center gap-1 ${
-                      (parsedData?.contact_info?.location || parsedData?.location)
-                        ? 'bg-green-100 text-green-800 border border-green-200'
-                        : 'bg-yellow-100 text-yellow-800 border border-yellow-200'
-                    }`}>
-                      {(parsedData?.contact_info?.location || parsedData?.location) ? (
-                        <>
-                          <CheckCircle className="h-3 w-3" />
-                          📍 {parsedData.contact_info?.location || parsedData.location}
-                        </>
-                      ) : (
-                        <>
-                          <AlertTriangle className="h-3 w-3" />
-                          📍 Location not found
-                        </>
-                      )}
-                    </span>
+                    {/* Location - only show if found, no warning if missing */}
+                    {(parsedData?.contact_info?.location || parsedData?.location) && (
+                      <span className="px-3 py-1.5 rounded-full text-sm flex items-center gap-1 bg-green-100 text-green-800 border border-green-200">
+                        <CheckCircle className="h-3 w-3" />
+                        📍 {parsedData.contact_info?.location || parsedData.location}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -499,25 +516,47 @@ export function ResumeComparison({ resumeId, scoreData }: ResumeComparisonProps)
                   </div>
                   {parsedData?.experience && parsedData.experience.length > 0 ? (
                     <div className="space-y-4">
-                      {parsedData.experience.map((exp: any, idx: number) => (
-                        <div key={idx} className="bg-white p-3 rounded-lg border border-gray-200">
-                          <div className="font-semibold text-gray-900 flex items-center gap-2">
-                            <CheckCircle className="h-4 w-4 text-green-600" />
-                            {exp.title || <span className="text-yellow-600">Title not parsed</span>}
-                          </div>
-                          {exp.company && (
-                            <div className="text-sm text-gray-600">{exp.company}</div>
-                          )}
-                          {exp.dates && (
-                            <div className="text-sm text-gray-500">{exp.dates}</div>
-                          )}
-                          {exp.bullets && exp.bullets.length > 0 && (
-                            <div className="mt-2 text-xs text-green-600">
-                              ✓ {exp.bullets.length} bullet points extracted
+                      {parsedData.experience.map((exp: any, idx: number) => {
+                        // Format dates
+                        let dateRange = ""
+                        if (exp.start_date && exp.start_date.trim()) {
+                          const start = exp.start_date.trim()
+                          const end = (exp.end_date && exp.end_date.trim()) ? exp.end_date.trim() : "Present"
+                          dateRange = `${start} - ${end}`
+                        } else if (exp.end_date && exp.end_date.trim()) {
+                          dateRange = `Until ${exp.end_date.trim()}`
+                        } else if (exp.dates && exp.dates.trim()) {
+                          dateRange = exp.dates.trim()
+                        }
+                        
+                        return (
+                          <div key={idx} className="bg-white p-3 rounded-lg border border-gray-200">
+                            <div className="font-semibold text-gray-900 flex items-center gap-2">
+                              <CheckCircle className="h-4 w-4 text-green-600" />
+                              {exp.title || <span className="text-yellow-600">Title not parsed</span>}
                             </div>
-                          )}
-                        </div>
-                      ))}
+                            {exp.company && (
+                              <div className="text-sm text-gray-600">{exp.company}</div>
+                            )}
+                            {dateRange && (
+                              <div className="text-sm text-gray-500">{dateRange}</div>
+                            )}
+                            {exp.location && (
+                              <div className="text-sm text-gray-500">{exp.location}</div>
+                            )}
+                            {exp.description && (
+                              <div className="mt-2 text-sm text-gray-700 whitespace-pre-wrap">{exp.description}</div>
+                            )}
+                            {exp.highlights && exp.highlights.length > 0 && (
+                              <ul className="mt-2 space-y-1">
+                                {exp.highlights.map((highlight: string, hIdx: number) => (
+                                  <li key={hIdx} className="text-sm text-gray-700">• {highlight}</li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        )
+                      })}
                     </div>
                   ) : (
                     <div className="text-red-600 text-sm flex items-center gap-2">
@@ -564,6 +603,81 @@ export function ResumeComparison({ resumeId, scoreData }: ResumeComparisonProps)
                     </div>
                   )}
                 </div>
+
+                {/* Projects */}
+                {(parsedData?.projects && parsedData.projects.length > 0) && (
+                  <div className="p-4 rounded-lg bg-green-50 border border-green-200">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="text-xs font-medium uppercase tracking-wide text-gray-600">PROJECTS</div>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-green-200 text-green-800">
+                        {parsedData.projects.length} {parsedData.projects.length === 1 ? 'project' : 'projects'}
+                      </span>
+                    </div>
+                    <div className="space-y-3">
+                      {parsedData.projects.map((project: any, idx: number) => (
+                        <div key={idx} className="bg-white p-3 rounded-lg border border-gray-200">
+                          <div className="font-semibold text-gray-900 flex items-center gap-2">
+                            <CheckCircle className="h-4 w-4 text-green-600" />
+                            {project.name || <span className="text-yellow-600">Project name not parsed</span>}
+                          </div>
+                          {project.description && (
+                            <div className="mt-2 text-sm text-gray-700 whitespace-pre-wrap">{project.description}</div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Achievements */}
+                {(parsedData?.achievements && parsedData.achievements.length > 0) && (
+                  <div className="p-4 rounded-lg bg-green-50 border border-green-200">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="text-xs font-medium uppercase tracking-wide text-gray-600">ACHIEVEMENTS</div>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-green-200 text-green-800">
+                        {parsedData.achievements.length} {parsedData.achievements.length === 1 ? 'achievement' : 'achievements'}
+                      </span>
+                    </div>
+                    <div className="space-y-3">
+                      {parsedData.achievements.map((achievement: any, idx: number) => (
+                        <div key={idx} className="bg-white p-3 rounded-lg border border-gray-200">
+                          <div className="font-semibold text-gray-900 flex items-center gap-2">
+                            <CheckCircle className="h-4 w-4 text-green-600" />
+                            {achievement.name || <span className="text-yellow-600">Achievement name not parsed</span>}
+                          </div>
+                          {achievement.description && (
+                            <div className="mt-2 text-sm text-gray-700 whitespace-pre-wrap">{achievement.description}</div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Associations / Extracurriculars */}
+                {(parsedData?.associations && parsedData.associations.length > 0) && (
+                  <div className="p-4 rounded-lg bg-green-50 border border-green-200">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="text-xs font-medium uppercase tracking-wide text-gray-600">ASSOCIATIONS / EXTRACURRICULARS</div>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-green-200 text-green-800">
+                        {parsedData.associations.length} {parsedData.associations.length === 1 ? 'entry' : 'entries'}
+                      </span>
+                    </div>
+                    <div className="space-y-3">
+                      {parsedData.associations.map((association: any, idx: number) => (
+                        <div key={idx} className="bg-white p-3 rounded-lg border border-gray-200">
+                          <div className="font-semibold text-gray-900 flex items-center gap-2">
+                            <CheckCircle className="h-4 w-4 text-green-600" />
+                            {association.name || <span className="text-yellow-600">Association name not parsed</span>}
+                          </div>
+                          {association.role && (
+                            <div className="mt-1 text-sm text-gray-600">{association.role}</div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
