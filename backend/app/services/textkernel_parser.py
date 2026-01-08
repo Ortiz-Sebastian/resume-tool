@@ -505,8 +505,25 @@ class TextkernelParser(BaseResumeParser):
                         # Major - Affinda uses educationMajor
                         major_obj = (parsed_edu.get("educationMajor") or 
                                     parsed_edu.get("major"))
+                        major = ""
                         if isinstance(major_obj, dict):
                             major = major_obj.get("raw", "") or major_obj.get("parsed", "") or ""
+                        elif isinstance(major_obj, list):
+                            majors: List[str] = []
+                            for m in major_obj:
+                                if isinstance(m, dict):
+                                    majors.append(m.get("raw", "") or m.get("parsed", "") or m.get("value", "") or "")
+                                elif m is not None:
+                                    majors.append(str(m))
+                            majors = [x.strip() for x in majors if isinstance(x, str) and x.strip()]
+                            # De-dupe while preserving order
+                            seen = set()
+                            majors_deduped = []
+                            for x in majors:
+                                if x not in seen:
+                                    seen.add(x)
+                                    majors_deduped.append(x)
+                            major = ", ".join(majors_deduped)
                         else:
                             major = str(major_obj) if major_obj else ""
                         

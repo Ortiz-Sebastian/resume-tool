@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { FileText, Eye, AlertCircle, CheckCircle, XCircle, AlertTriangle } from 'lucide-react'
 import axios from 'axios'
+import { DataValidation } from './DataValidation'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
@@ -18,6 +19,7 @@ interface ExtractionStatus {
   extractedValue: string | null
   status: 'found' | 'missing' | 'partial'
   weight: number  // Importance weight for scoring
+  hasValidationIssues?: boolean  // Indicator if validation issues exist
 }
 
 // Field weights - higher = more important for ATS
@@ -35,6 +37,27 @@ export function ResumeComparison({ resumeId, scoreData }: ResumeComparisonProps)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>('')
   const [activeView, setActiveView] = useState<'side-by-side' | 'extraction'>('side-by-side')
+
+  const formatExtractedValue = (value: any): string => {
+    if (value == null) return ''
+    if (typeof value === 'string') return value
+    if (Array.isArray(value)) {
+      const parts = value
+        .map((v) => {
+          if (typeof v === 'string') return v
+          if (v && typeof v === 'object') return v.raw || v.parsed || v.value || ''
+          return ''
+        })
+        .map((s) => (typeof s === 'string' ? s.trim() : ''))
+        .filter(Boolean)
+      // de-dupe
+      return Array.from(new Set(parts)).join(', ')
+    }
+    if (typeof value === 'object') {
+      return (value.raw || value.parsed || value.value || '').toString()
+    }
+    return String(value)
+  }
 
   useEffect(() => {
     if (resumeId) {
@@ -149,24 +172,29 @@ export function ResumeComparison({ resumeId, scoreData }: ResumeComparisonProps)
 
     // Experience
     const experience = parsedData.experience || []
+    const validationResults = parsedData.data_validation || {}
+    const experienceValidation = validationResults.experience || {}
     statuses.push({
       field: 'experience',
       label: 'Experience',
       originalValue: null,
       extractedValue: experience.length > 0 ? `${experience.length} positions found` : null,
       status: experience.length > 0 ? 'found' : 'missing',
-      weight: FIELD_WEIGHTS.experience
+      weight: FIELD_WEIGHTS.experience,
+      hasValidationIssues: experienceValidation.has_issues || false
     })
 
     // Education
     const education = parsedData.education || []
+    const educationValidation = validationResults.education || {}
     statuses.push({
       field: 'education',
       label: 'Education',
       originalValue: null,
       weight: FIELD_WEIGHTS.education,
       extractedValue: education.length > 0 ? `${education.length} entries found` : null,
-      status: education.length > 0 ? 'found' : 'missing'
+      status: education.length > 0 ? 'found' : 'missing',
+      hasValidationIssues: educationValidation.has_issues || false
     })
 
     return statuses
@@ -189,6 +217,7 @@ export function ResumeComparison({ resumeId, scoreData }: ResumeComparisonProps)
         earnedPoints += item.weight * 0.5  // Half points
       }
       // 'missing' = 0 points
+      // Note: Validation issues don't reduce extraction score, they're shown separately
     })
     
     return totalPossiblePoints > 0 
@@ -274,79 +303,98 @@ export function ResumeComparison({ resumeId, scoreData }: ResumeComparisonProps)
       </div>
 
       {activeView === 'extraction' ? (
-        /* Extraction Status View */
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-          <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4">
-            <h3 className="text-lg font-semibold text-white">ATS Extraction Summary</h3>
-            <p className="text-blue-100 text-sm mt-1">What the ATS was able to extract from your resume</p>
-          </div>
-          <div className="p-6">
-            {/* Weight explanation */}
-            <div className="mb-4 p-3 bg-blue-50 rounded-lg text-sm text-blue-800">
-              <strong>Weighted Scoring:</strong> Critical fields (Name, Email, Experience, Skills) count more toward your score.
+        <div>
+          {/* Extraction Status View */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4">
+              <h3 className="text-lg font-semibold text-white">ATS Extraction Summary</h3>
+              <p className="text-blue-100 text-sm mt-1">What the ATS was able to extract from your resume</p>
             </div>
-            <div className="grid gap-4">
-              {extractionStatus.map((item) => (
-                <div
-                  key={item.field}
-                  className={`flex items-center justify-between p-4 rounded-lg border-2 ${
-                    item.status === 'found' ? 'bg-green-50 border-green-200' :
-                    item.status === 'partial' ? 'bg-yellow-50 border-yellow-200' :
-                    'bg-red-50 border-red-200'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    {item.status === 'found' ? (
-                      <CheckCircle className="h-6 w-6 text-green-600" />
-                    ) : item.status === 'partial' ? (
-                      <AlertTriangle className="h-6 w-6 text-yellow-600" />
-                    ) : (
-                      <XCircle className="h-6 w-6 text-red-600" />
-                    )}
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-gray-900">{item.label}</span>
-                        {/* Importance badge */}
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${
-                          item.weight >= 1.5 ? 'bg-purple-100 text-purple-700' :
-                          item.weight >= 1.0 ? 'bg-blue-100 text-blue-700' :
-                          'bg-gray-100 text-gray-600'
-                        }`}>
-                          {item.weight >= 1.5 ? 'Critical' :
-                           item.weight >= 1.0 ? 'Important' :
-                           'Optional'}
-                        </span>
-                      </div>
-                      <div className={`text-sm ${
-                        item.status === 'found' ? 'text-green-700' :
-                        item.status === 'partial' ? 'text-yellow-700' :
-                        'text-red-700'
-                      }`}>
-                        {item.status === 'found' ? 'Successfully extracted' :
-                         item.status === 'partial' ? 'Partially extracted' :
-                         'Not found by ATS'}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-right flex items-center gap-2">
-                    {item.extractedValue ? (
-                      <span className="text-sm text-gray-700 bg-white px-3 py-1 rounded-full">
-                        {item.extractedValue}
-                      </span>
-                    ) : (
-                      <span className="text-sm text-red-600 font-medium">
-                        ⚠️ Missing
-                      </span>
-                    )}
-                    {/* Weight indicator */}
-                    <span className="text-xs text-gray-400" title="Weight for scoring">
-                      ×{item.weight}
-                    </span>
+            <div className="p-6">
+              {/* Weight explanation */}
+              <div className="mb-4 p-3 bg-blue-50 rounded-lg text-sm text-blue-800">
+                <strong>Weighted Scoring:</strong> Critical fields (Name, Email, Experience, Skills) count more toward your score.
+              </div>
+              <div className="grid gap-4">
+                {extractionStatus.map((item) => (
+                  <div
+                         key={item.field}
+                         className={`flex items-center justify-between p-4 rounded-lg border-2 ${
+                           item.status === 'found' ? 'bg-green-50 border-green-200' :
+                           item.status === 'partial' ? 'bg-yellow-50 border-yellow-200' :
+                           'bg-red-50 border-red-200'
+                         }`}
+                       >
+                         <div className="flex items-start gap-3 flex-1">
+                           {item.status === 'found' ? (
+                             <CheckCircle className="h-6 w-6 text-green-600 mt-0.5" />
+                           ) : item.status === 'partial' ? (
+                             <AlertTriangle className="h-6 w-6 text-yellow-600 mt-0.5" />
+                           ) : (
+                             <XCircle className="h-6 w-6 text-red-600 mt-0.5" />
+                           )}
+                           <div className="flex-1">
+                             <div className="flex items-center gap-2 mb-1">
+                               <span className="font-semibold text-gray-900">{item.label}</span>
+                               {/* Validation warning indicator */}
+                               {item.hasValidationIssues && (
+                                 <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 border border-orange-200 flex items-center gap-1">
+                                   <AlertCircle className="h-3 w-3" />
+                                   Accuracy issues
+                                 </span>
+                               )}
+                               {/* Importance badge */}
+                               <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                 item.weight >= 1.5 ? 'bg-purple-100 text-purple-700' :
+                                 item.weight >= 1.0 ? 'bg-blue-100 text-blue-700' :
+                                 'bg-gray-100 text-gray-600'
+                               }`}>
+                                 {item.weight >= 1.5 ? 'Critical' :
+                                  item.weight >= 1.0 ? 'Important' :
+                                  'Optional'}
+                               </span>
+                             </div>
+                             <div className={`text-sm ${
+                               item.status === 'found' ? 'text-green-700' :
+                               item.status === 'partial' ? 'text-yellow-700' :
+                               'text-red-700'
+                             }`}>
+                               {item.status === 'found' ? 'Successfully extracted' :
+                                item.status === 'partial' ? 'Partially extracted' :
+                                'Not found by ATS'}
+                             </div>
+                           </div>
+                         </div>
+                         <div className="text-right flex items-center gap-2 ml-4">
+                           {item.extractedValue ? (
+                             <span className="text-sm px-3 py-1 rounded-full text-gray-700 bg-white">
+                               {item.extractedValue}
+                             </span>
+                           ) : (
+                             <span className="text-sm text-red-600 font-medium">
+                               ⚠️ Missing
+                             </span>
+                           )}
+                           {/* Weight indicator */}
+                           <span className="text-xs text-gray-400" title="Weight for scoring">
+                             ×{item.weight}
+                           </span>
                   </div>
                 </div>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
+
+          {/* Data Validation Component */}
+          {parsedData?.data_validation && (
+            <div className="mt-6">
+              <DataValidation 
+                validationResults={parsedData.data_validation}
+                parsedData={parsedData}
+              />
+            </div>
+          )}
         </div>
       ) : (
         /* Side by Side View */
@@ -579,24 +627,30 @@ export function ResumeComparison({ resumeId, scoreData }: ResumeComparisonProps)
                       {parsedData?.education?.length || 0} entries
                     </span>
                   </div>
-                  {parsedData?.education && parsedData.education.length > 0 ? (
-                    <div className="space-y-3">
-                      {parsedData.education.map((edu: any, idx: number) => (
-                        <div key={idx} className="bg-white p-3 rounded-lg border border-gray-200">
-                          <div className="font-semibold text-gray-900 flex items-center gap-2">
-                            <CheckCircle className="h-4 w-4 text-green-600" />
-                            {edu.degree || <span className="text-yellow-600">Degree not parsed</span>}
-                          </div>
-                          {edu.institution && (
-                            <div className="text-sm text-gray-600">{edu.institution}</div>
-                          )}
-                          {edu.graduation_date && (
-                            <div className="text-sm text-gray-500">{edu.graduation_date}</div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
+                         {parsedData?.education && parsedData.education.length > 0 ? (
+                           <div className="space-y-3">
+                             {parsedData.education.map((edu: any, idx: number) => (
+                                 <div key={idx} className="bg-white p-3 rounded-lg border border-gray-200">
+                                   <div className="font-semibold text-gray-900 flex items-center gap-2">
+                                     <CheckCircle className="h-4 w-4 text-green-600" />
+                                     {edu.degree || <span className="text-yellow-600">Degree not parsed</span>}
+                                   </div>
+                                   {edu.institution && (
+                                     <div className="text-sm text-gray-600">{edu.institution}</div>
+                                   )}
+                                   {edu.graduation_date && (
+                                     <div className="text-sm text-gray-500">{edu.graduation_date}</div>
+                                   )}
+                                   {edu.gpa && (
+                                     <div className="text-sm text-gray-500">{edu.gpa}</div>
+                                   )}
+                                   {edu.major && (
+                                     <div className="text-sm text-gray-600">Major: {formatExtractedValue(edu.major)}</div>
+                                   )}
+                                 </div>
+                             ))}
+                           </div>
+                         ) : (
                     <div className="text-red-600 text-sm flex items-center gap-2">
                       <XCircle className="h-4 w-4" />
                       No education extracted

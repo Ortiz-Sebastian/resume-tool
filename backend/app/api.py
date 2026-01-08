@@ -107,6 +107,12 @@ def parse_resume_task(resume_id: int, file_path: str, file_type: str):
         print(f"[PARSE TASK] Parse completed. Data keys: {list(parsed_data.keys()) if isinstance(parsed_data, dict) else 'Not a dict'}")
         print(f"[PARSE TASK] Parsed data type: {type(parsed_data)}")
         
+        # Validate extracted data for accuracy
+        from app.services.data_validator import DataValidator
+        validator = DataValidator()
+        validation_results = validator.validate(parsed_data)
+        parsed_data["data_validation"] = validation_results
+        
         resume = db.query(Resume).filter(Resume.id == resume_id).first()
         if resume:
             # Ensure data is JSON-serializable
@@ -120,6 +126,7 @@ def parse_resume_task(resume_id: int, file_path: str, file_type: str):
                 print(f"[PARSE TASK] Saved parsed_data to resume {resume_id}. Has data: {resume.parsed_data is not None}")
                 if resume.parsed_data:
                     print(f"[PARSE TASK] Saved data keys: {list(resume.parsed_data.keys()) if isinstance(resume.parsed_data, dict) else 'Not a dict'}")
+                print(f"[PARSE TASK] Validation results: {validation_results['overall']['total_issues']} issues found")
             except (TypeError, ValueError) as json_error:
                 print(f"[PARSE TASK] ERROR: Data is not JSON-serializable: {str(json_error)}")
                 print(f"[PARSE TASK] Problematic data type: {type(parsed_data)}")
