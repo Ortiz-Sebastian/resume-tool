@@ -16,38 +16,48 @@ interface Highlight {
   issue_type: string
   message: string
   tooltip: string
+  issue_id?: string  // For fix mode navigation
+  blocks?: Array<{
+    page: number
+    bbox: number[]
+    text_preview: string
+  }>
+  detected_reason?: string
+  expected_section?: string
 }
 
 interface PDFHighlightViewerProps {
   pdfUrl: string
   highlights: Highlight[]
   resumeId: number
+  scrollToIssueId?: string | null  // Issue ID to scroll to
+  onScrollComplete?: () => void  // Callback when scroll completes
 }
 
 const SEVERITY_COLORS = {
   critical: {
-    bg: 'rgba(239, 68, 68, 0.2)',
+    bg: 'rgba(239, 68, 68, 0.3)',  // Increased opacity for visibility
     border: '#EF4444',
     label: 'Critical',
     icon: '🔴',
     textColor: 'text-red-700'
   },
   high: {
-    bg: 'rgba(249, 115, 22, 0.2)',
+    bg: 'rgba(249, 115, 22, 0.3)',  // Increased opacity for visibility
     border: '#F97316',
     label: 'High',
     icon: '🟠',
     textColor: 'text-orange-700'
   },
   medium: {
-    bg: 'rgba(234, 179, 8, 0.2)',
+    bg: 'rgba(234, 179, 8, 0.3)',  // Increased opacity for visibility
     border: '#EAB308',
     label: 'Medium',
     icon: '🟡',
     textColor: 'text-yellow-700'
   },
   low: {
-    bg: 'rgba(59, 130, 246, 0.2)',
+    bg: 'rgba(59, 130, 246, 0.3)',  // Increased opacity for visibility
     border: '#3B82F6',
     label: 'Low',
     icon: '🔵',
@@ -55,7 +65,7 @@ const SEVERITY_COLORS = {
   }
 }
 
-export function PDFHighlightViewer({ pdfUrl, highlights, resumeId }: PDFHighlightViewerProps) {
+export function PDFHighlightViewer({ pdfUrl, highlights, resumeId, scrollToIssueId, onScrollComplete }: PDFHighlightViewerProps) {
   const [hoveredHighlight, setHoveredHighlight] = useState<number | null>(null)
   const [numPages, setNumPages] = useState<number>(0)
   const [pageNumber, setPageNumber] = useState<number>(1)
@@ -63,19 +73,126 @@ export function PDFHighlightViewer({ pdfUrl, highlights, resumeId }: PDFHighligh
   const [pageHeight, setPageHeight] = useState<number>(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>('')
-  const containerRef = useRef<HTMLDivElement>(null)
+  const [lockedHighlight, setLockedHighlight] = useState<number | null>(null)  // For fix mode lock
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const pageContainerRef = useRef<HTMLDivElement>(null)  // Ref for the page container (for highlight positioning)
+  const widthContainerRef = useRef<HTMLDivElement>(null)  // Ref for width calculation
 
   // Debug: Log highlights data
   useEffect(() => {
     console.log('PDFHighlightViewer - Highlights:', highlights)
+    console.log('PDFHighlightViewer - Highlights count:', highlights.length)
+    console.log('PDFHighlightViewer - Highlights with bbox:', highlights.filter(h => h.bbox && Array.isArray(h.bbox) && h.bbox.length === 4).length)
+    if (highlights.length > 0) {
+      console.log('PDFHighlightViewer - First highlight:', highlights[0])
+    }
   }, [highlights])
 
   useEffect(() => {
-    if (containerRef.current) {
-      const width = containerRef.current.offsetWidth * 0.9
-      setPageWidth(width)
+    const updateWidth = () => {
+      if (scrollContainerRef.current) {
+        const width = scrollContainerRef.current.offsetWidth * 0.95
+        setPageWidth(width)
+        console.log('PDFHighlightViewer - Container width:', scrollContainerRef.current.offsetWidth, 'Page width:', width)
+      }
     }
+    
+    updateWidth()
+    window.addEventListener('resize', updateWidth)
+    return () => window.removeEventListener('resize', updateWidth)
   }, [])
+
+  // Auto-scroll to specific issue (fix mode)
+  useEffect(() => {
+    if (!scrollToIssueId || !highlights.length || loading) {
+      console.log('PDFHighlightViewer - Scroll skipped:', { scrollToIssueId, highlightsLength: highlights.length, loading })
+      return
+    }
+
+    console.log('PDFHighlightViewer - Looking for issue_id:', scrollToIssueId)
+    console.log('PDFHighlightViewer - Available highlights:', highlights.map(h => ({ issue_id: h.issue_id, issue_type: h.issue_type, code: h.code })))
+
+    // Find highlight with matching issue_id, issue_type, or code
+    const targetIndex = highlights.findIndex(h => {
+      const matchId = h.issue_id === scrollToIssueId
+      const matchType = h.issue_type === scrollToIssueId
+      const matchCode = h.code === scrollToIssueId
+      return matchId || matchType || matchCode
+    })
+    
+    if (targetIndex === -1) {
+      console.log('PDFHighlightViewer - No matching highlight found for:', scrollToIssueId)
+      if (onScrollComplete) onScrollComplete() // Still call completion to reset state
+      return
+    }
+
+    const targetHighlight = highlights[targetIndex]
+    console.log('PDFHighlightViewer - Found target highlight:', targetHighlight)
+    
+    // Switch to the correct page first
+    const targetPage = targetHighlight.page || 1
+    console.log('PDFHighlightViewer - Switching to page:', targetPage, 'Current page:', pageNumber)
+    
+    // Set page number - this will trigger a re-render
+    if (pageNumber !== targetPage) {
+      setPageNumber(targetPage)
+      // Wait for page to change before locking highlight
+      setTimeout(() => {
+        setLockedHighlight(targetIndex)
+        console.log('PDFHighlightViewer - Locked highlight index:', targetIndex, 'issue_id:', targetHighlight.issue_id)
+      }, 100)
+    } else {
+      // Page is already correct, lock immediately
+      setLockedHighlight(targetIndex)
+      console.log('PDFHighlightViewer - Locked highlight index:', targetIndex, 'issue_id:', targetHighlight.issue_id)
+    }
+    
+    // Wait for page to render, then scroll and ensure highlight is visible
+    // Use a longer delay to ensure the page has fully rendered and highlight is locked
+    const scrollDelay = pageNumber !== targetPage ? 800 : 500  // Longer delay if page changed
+    setTimeout(() => {
+      if (scrollContainerRef.current && targetHighlight.bbox && Array.isArray(targetHighlight.bbox) && targetHighlight.bbox.length === 4) {
+        const actualPageWidth = pageWidth > 0 ? pageWidth : 600
+        const scale = actualPageWidth / 595  // A4 page width in points
+        const [x0, y0, x1, y1] = targetHighlight.bbox
+        
+        // Calculate scroll position - account for the page position in the container
+        const scaledY = y0 * scale
+        const scrollY = Math.max(0, scaledY - 150)  // Offset to show above highlight with more margin
+        
+        console.log('PDFHighlightViewer - Scrolling to:', { 
+          scrollY, 
+          bbox: targetHighlight.bbox, 
+          scale,
+          pageWidth: actualPageWidth,
+          scaledY,
+          containerHeight: scrollContainerRef.current.scrollHeight
+        })
+        
+        // Scroll the container
+        scrollContainerRef.current.scrollTo({
+          top: scrollY,
+          behavior: 'smooth'
+        })
+        
+        // Also ensure the highlight is visible by scrolling again after a short delay
+        setTimeout(() => {
+          scrollContainerRef.current?.scrollTo({
+            top: scrollY,
+            behavior: 'smooth'
+          })
+        }, 200)
+        
+        // Call completion callback
+        if (onScrollComplete) {
+          setTimeout(() => onScrollComplete(), 1200)  // Wait longer for scroll animation and page render
+        }
+      } else {
+        console.log('PDFHighlightViewer - Invalid bbox for scrolling:', targetHighlight.bbox)
+        if (onScrollComplete) onScrollComplete()
+      }
+    }, scrollDelay)  // Dynamic delay based on whether page changed
+  }, [scrollToIssueId, highlights, loading, pageWidth, onScrollComplete])
 
   const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
     setNumPages(numPages)
@@ -89,8 +206,13 @@ export function PDFHighlightViewer({ pdfUrl, highlights, resumeId }: PDFHighligh
   }
 
   const onPageLoadSuccess = (page: any) => {
+    // Calculate the actual scale based on the rendered page width
     const viewport = page.getViewport({ scale: 1 })
-    setPageHeight(viewport.height)
+    const actualWidth = pageWidth > 0 ? pageWidth : 600
+    const scale = actualWidth / viewport.width
+    const scaledHeight = viewport.height * scale
+    setPageHeight(scaledHeight)
+    console.log('PDFHighlightViewer - Page loaded:', { viewportWidth: viewport.width, viewportHeight: viewport.height, actualWidth, scale, scaledHeight })
   }
 
   return (
@@ -110,7 +232,7 @@ export function PDFHighlightViewer({ pdfUrl, highlights, resumeId }: PDFHighligh
       </div>
 
       <div 
-        ref={containerRef}
+        ref={scrollContainerRef}
         className="relative bg-gray-100 overflow-auto" 
         style={{ height: '800px', position: 'relative' }}
       >
@@ -139,69 +261,247 @@ export function PDFHighlightViewer({ pdfUrl, highlights, resumeId }: PDFHighligh
                 onLoadError={onDocumentLoadError}
                 loading={null}
               >
-                <div className="relative">
-                  <Page
-                    pageNumber={pageNumber}
-                    width={pageWidth || undefined}
-                    onLoadSuccess={onPageLoadSuccess}
-                    renderTextLayer={true}
-                    renderAnnotationLayer={false}
-                  />
+                <div className="relative" style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'flex-start' }}>
+                  <div 
+                    className="relative" 
+                    ref={pageContainerRef}
+                    style={{ 
+                      position: 'relative', 
+                      display: 'inline-block',
+                      // Ensure this container matches the Page dimensions exactly
+                      width: pageWidth > 0 ? `${pageWidth}px` : '600px',
+                      minHeight: pageHeight > 0 ? `${pageHeight}px` : 'auto'
+                    }}
+                  >
+                    <Page
+                      pageNumber={pageNumber}
+                      width={pageWidth > 0 ? pageWidth : 600}
+                      onLoadSuccess={onPageLoadSuccess}
+                      renderTextLayer={true}
+                      renderAnnotationLayer={false}
+                      className="shadow-lg"
+                    />
 
-                  {/* Highlight Overlays */}
-                  {!loading && pageWidth > 0 && (
-                    <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 100 }}>
-                      {highlights
-                        .map((highlight, idx) => ({ highlight, idx }))
-                        .filter(({ highlight }) => highlight.page === pageNumber)
-                        .sort((a, b) => {
-                          // Calculate area of each highlight
-                          const areaA = (a.highlight.bbox[2] - a.highlight.bbox[0]) * (a.highlight.bbox[3] - a.highlight.bbox[1])
-                          const areaB = (b.highlight.bbox[2] - b.highlight.bbox[0]) * (b.highlight.bbox[3] - b.highlight.bbox[1])
-                          // Larger areas first (rendered first = lower z-index)
-                          return areaB - areaA
-                        })
-                        .map(({ highlight, idx }, sortedIdx) => {
+                    {/* Highlight Overlays */}
+                    {(() => {
+                    // Always log the rendering attempt, even if conditions aren't met
+                    console.log('PDFHighlightViewer - Render check:', {
+                      loading,
+                      pageWidth,
+                      highlightsLength: highlights.length,
+                      pageNumber,
+                      shouldRender: !loading && pageWidth > 0 && highlights.length > 0
+                    })
+                    
+                    if (loading || pageWidth === 0 || highlights.length === 0) {
+                      return null
+                    }
+                    
+                    console.log('PDFHighlightViewer - Attempting to render highlights. pageWidth:', pageWidth, 'pageNumber:', pageNumber, 'highlights count:', highlights.length)
+                    
+                    const validHighlights = highlights
+                      .map((highlight, idx) => ({ highlight, idx }))
+                      .filter(({ highlight }) => {
+                        // Only show highlights with valid bbox and matching page
+                        const hasValidBbox = highlight.bbox && 
+                                             Array.isArray(highlight.bbox) && 
+                                             highlight.bbox.length === 4 &&
+                                             highlight.bbox.every((v: any) => typeof v === 'number' && !isNaN(v))
+                        const matchesPage = highlight.page === pageNumber
+                        
+                        if (!hasValidBbox) {
+                          console.log('PDFHighlightViewer - Invalid bbox for highlight:', highlight.code || highlight.issue_type, highlight.bbox)
+                        }
+                        if (!matchesPage && hasValidBbox) {
+                          console.log('PDFHighlightViewer - Page mismatch:', highlight.page, 'vs', pageNumber, 'for', highlight.code || highlight.issue_type)
+                        }
+                        
+                        return hasValidBbox && matchesPage
+                      })
+                      .sort((a, b) => {
+                        // Calculate area of each highlight
+                        const bboxA = a.highlight.bbox
+                        const bboxB = b.highlight.bbox
+                        const areaA = (bboxA[2] - bboxA[0]) * (bboxA[3] - bboxA[1])
+                        const areaB = (bboxB[2] - bboxB[0]) * (bboxB[3] - bboxB[1])
+                        // Larger areas first (rendered first = lower z-index)
+                        return areaB - areaA
+                      })
+                    
+                    console.log('PDFHighlightViewer - Valid highlights for page', pageNumber, ':', validHighlights.length, 'out of', highlights.length)
+                    console.log('PDFHighlightViewer - Valid highlights details:', validHighlights.map(({ highlight, idx }) => ({
+                      idx,
+                      issue_type: highlight.issue_type,
+                      issue_id: highlight.issue_id,
+                      page: highlight.page,
+                      bbox: highlight.bbox,
+                      severity: highlight.severity
+                    })))
+                    
+                    if (validHighlights.length === 0) {
+                      console.log('PDFHighlightViewer - No valid highlights to render for page', pageNumber)
+                      return null
+                    }
+                    
+                    // Calculate scale based on actual rendered page dimensions
+                    // Get the actual viewport from the page (if available) or use standard A4 dimensions
+                    // Standard A4: 595pt x 842pt
+                    const actualPageWidth = pageWidth > 0 ? pageWidth : 600
+                    const scale = actualPageWidth / 595  // Scale factor for PDF coordinates
+                    // Use pageHeight from state if available, otherwise calculate from A4 ratio
+                    const actualPageHeight = pageHeight > 0 ? pageHeight : (actualPageWidth * (842 / 595))
+                    
+                    console.log('PDFHighlightViewer - Rendering highlights:', {
+                      pageWidth: actualPageWidth,
+                      pageHeight: actualPageHeight,
+                      scale,
+                      validHighlightsCount: validHighlights.length
+                    })
+                    
+                    console.log('PDFHighlightViewer - Creating highlight overlay div:', {
+                      actualPageWidth,
+                      actualPageHeight,
+                      scale,
+                      validHighlightsCount: validHighlights.length,
+                      pageNumber,
+                      lockedHighlight
+                    })
+                    
+                    // Calculate the actual rendered page height from react-pdf
+                    // The Page component scales proportionally, so height = width * (842/595) for A4
+                    const calculatedPageHeight = actualPageWidth * (842 / 595)
+                    const finalPageHeight = pageHeight > 0 ? pageHeight : calculatedPageHeight
+                    
+                    console.log('PDFHighlightViewer - Overlay dimensions:', {
+                      width: actualPageWidth,
+                      height: finalPageHeight,
+                      calculatedHeight: calculatedPageHeight,
+                      pageHeightFromState: pageHeight
+                    })
+                    
+                    return (
+                      <div 
+                        className="absolute pointer-events-none" 
+                        style={{ 
+                          zIndex: 1000,  // High z-index to ensure it's above PDF
+                          top: 0,
+                          left: 0,
+                          width: `${actualPageWidth}px`,
+                          height: `${finalPageHeight}px`,
+                          // Ensure it's positioned exactly over the Page component
+                          position: 'absolute',
+                          // Temporary debug: Uncomment to see overlay bounds
+                          // backgroundColor: 'rgba(255, 0, 0, 0.05)',
+                          // border: '2px solid red'
+                        }}
+                        data-testid="highlight-overlay"
+                      >
+                        {validHighlights.map(({ highlight, idx }, sortedIdx) => {
                         const colors = SEVERITY_COLORS[highlight.severity]
                         const [x0, y0, x1, y1] = highlight.bbox
                         
-                        // Scale coordinates to fit container
-                        // PDF coordinates are in points (72 points = 1 inch)
-                        // A4 page is typically 595pt x 842pt
-                        const scale = pageWidth / 595
+                        // Scale the bbox coordinates to match the rendered page size
+                        const scaledX0 = x0 * scale
+                        const scaledY0 = y0 * scale
+                        const scaledX1 = x1 * scale
+                        const scaledY1 = y1 * scale
+                        const scaledWidth = scaledX1 - scaledX0
+                        const scaledHeight = scaledY1 - scaledY0
                         
                         // Calculate area to determine if this is a large highlight
-                        const area = (x1 - x0) * (y1 - y0)
-                        const isLargeHighlight = area > 200000 // Covers significant portion of page
+                        const area = scaledWidth * scaledHeight
+                        const isLargeHighlight = area > (actualPageWidth * actualPageHeight * 0.3) // 30% of page
                         
-                        console.log('Rendering highlight:', idx, 'Area:', area, 'IsLarge:', isLargeHighlight, 'Hovered:', hoveredHighlight)
+                        // Check if this highlight is locked - compare by issue_id/code/issue_type, not index
+                        const lockedHighlightObj = lockedHighlight !== null ? highlights[lockedHighlight] : null
+                        const isLocked = lockedHighlight !== null && (
+                          lockedHighlight === idx || 
+                          (lockedHighlightObj?.issue_id && lockedHighlightObj.issue_id === highlight.issue_id) ||
+                          (lockedHighlightObj?.issue_type && lockedHighlightObj.issue_type === highlight.issue_type) ||
+                          (lockedHighlightObj?.code && lockedHighlightObj.code === highlight.code) ||
+                          // Fallback: match by issue_type if both are defined
+                          (lockedHighlightObj?.issue_type && highlight.issue_type && lockedHighlightObj.issue_type === highlight.issue_type)
+                        )
+                        
+                        console.log('PDFHighlightViewer - Rendering highlight:', {
+                          idx,
+                          issue_type: highlight.issue_type,
+                          issue_id: highlight.issue_id,
+                          originalBbox: [x0, y0, x1, y1],
+                          scaledBbox: [scaledX0, scaledY0, scaledX1, scaledY1],
+                          scaledSize: [scaledWidth, scaledHeight],
+                          area,
+                          isLargeHighlight,
+                          scale,
+                          isLocked,
+                          colors: colors.border
+                        })
+                        
+                        if (isLocked) {
+                          console.log('PDFHighlightViewer - Highlight is LOCKED:', {
+                            idx,
+                            issue_type: highlight.issue_type,
+                            issue_id: highlight.issue_id,
+                            lockedIndex: lockedHighlight,
+                            lockedObj: lockedHighlightObj
+                          })
+                        }
+                        
+                        // Log every highlight being rendered
+                        console.log(`PDFHighlightViewer - Rendering highlight ${idx}:`, {
+                          issue_type: highlight.issue_type,
+                          position: { left: scaledX0, top: scaledY0, width: scaledWidth, height: scaledHeight },
+                          isLocked,
+                          isLargeHighlight,
+                          colors: colors.border
+                        })
                         
                         return (
                           <div
-                            key={idx}
+                            key={`highlight-${idx}-${highlight.issue_id || highlight.issue_type || 'unknown'}`}
                             className={`absolute transition-all duration-200 ${isLargeHighlight ? 'pointer-events-none' : 'pointer-events-auto cursor-help'}`}
                             style={{
-                              left: `${x0 * scale}px`,
-                              top: `${y0 * scale}px`,
-                              width: `${(x1 - x0) * scale}px`,
-                              height: `${(y1 - y0) * scale}px`,
+                              left: `${scaledX0}px`,
+                              top: `${scaledY0}px`,
+                              width: `${scaledWidth}px`,
+                              height: `${scaledHeight}px`,
                               backgroundColor: isLargeHighlight ? 'transparent' : colors.bg,
-                              border: `${isLargeHighlight ? '3px dashed' : '2px solid'} ${colors.border}`,
+                              border: `${isLargeHighlight ? '3px dashed' : isLocked ? '4px solid' : '2px solid'} ${colors.border}`,
                               borderRadius: '4px',
-                              boxShadow: hoveredHighlight === idx ? `0 0 0 4px ${colors.bg}` : 'none',
-                              // Smaller highlights get higher z-index
-                              zIndex: hoveredHighlight === idx ? 9999 : (100 + sortedIdx)
+                              boxShadow: isLocked 
+                                ? `0 0 0 8px ${colors.bg}, 0 0 30px ${colors.border}, inset 0 0 20px ${colors.bg}` 
+                                : (hoveredHighlight === idx ? `0 0 0 4px ${colors.bg}` : 'none'),
+                              // Ensure highlights are above the PDF (react-pdf renders at z-index ~1-10)
+                              zIndex: isLocked ? 99999 : (hoveredHighlight === idx ? 9999 : (1000 + sortedIdx)),
+                              animation: isLocked ? 'pulse 1.5s infinite' : 'none',
+                              // Make sure it's visible - locked highlights should be more visible
+                              opacity: isLocked ? 1 : (isLargeHighlight ? 0.4 : 0.9),  // Increased opacity for better visibility
+                              pointerEvents: isLargeHighlight ? 'none' : 'auto',
+                              // Add a glow effect for locked highlights
+                              filter: isLocked ? `drop-shadow(0 0 12px ${colors.border}) drop-shadow(0 0 6px ${colors.border})` : 'none',
+                              // Ensure it's always visible
+                              display: 'block',
+                              visibility: 'visible',
+                              // Force rendering
+                              willChange: 'transform',
+                              transform: 'translateZ(0)'  // Force GPU acceleration
                             }}
                             onMouseEnter={() => {
-                              if (!isLargeHighlight) {
+                              if (!isLargeHighlight && !isLocked) {
                                 console.log('Mouse entered highlight:', idx)
                                 setHoveredHighlight(idx)
                               }
                             }}
                             onMouseLeave={() => {
-                              if (!isLargeHighlight) {
+                              if (!isLargeHighlight && !isLocked) {
                                 console.log('Mouse left highlight:', idx)
                                 setHoveredHighlight(null)
+                              }
+                            }}
+                            onClick={() => {
+                              if (!isLargeHighlight) {
+                                // Toggle lock on click
+                                setLockedHighlight(isLocked ? null : idx)
                               }
                             }}
                           >
@@ -272,8 +572,10 @@ export function PDFHighlightViewer({ pdfUrl, highlights, resumeId }: PDFHighligh
                           </div>
                         )
                       })}
-                    </div>
-                  )}
+                      </div>
+                    )
+                  })()}
+                  </div>
                 </div>
               </Document>
 
@@ -322,9 +624,19 @@ export function PDFHighlightViewer({ pdfUrl, highlights, resumeId }: PDFHighligh
               </div>
             ))}
           </div>
-          <span className="text-xs text-gray-500">Hover over highlights for details</span>
+          <span className="text-xs text-gray-500">
+            {lockedHighlight !== null ? '🔒 Highlight locked - Click to unlock' : 'Hover over highlights for details • Click to lock view'}
+          </span>
         </div>
       </div>
+      
+      {/* Add pulse animation for locked highlights */}
+      <style jsx>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.8; }
+        }
+      `}</style>
     </div>
   )
 }

@@ -1,5 +1,6 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import { AlertTriangle, CheckCircle2, XCircle, AlertCircle, Info, Lightbulb } from 'lucide-react'
 
 interface IssueSummary {
@@ -14,10 +15,30 @@ interface IssueSummaryPanelProps {
   summary: IssueSummary
   suggestions: string[]
   issues?: string[]  // List of actual issues detected
+  issueDetails?: Array<{  // Detailed issue info for fix mode
+    code: string
+    message: string
+    severity: 'critical' | 'high' | 'medium' | 'low'
+    blocks?: Array<{
+      page: number
+      bbox: number[]
+      text_preview: string
+    }>
+    detected_reason?: string
+    expected_section?: string
+  }>
+  onIssueClick?: (issueId: string) => void  // Callback when issue is clicked
 }
 
-export function IssueSummaryPanel({ summary, suggestions, issues = [] }: IssueSummaryPanelProps) {
+export function IssueSummaryPanel({ summary, suggestions, issues = [], issueDetails = [], onIssueClick }: IssueSummaryPanelProps) {
   const { total_issues, critical, high, medium, low } = summary
+
+  // Debug logging
+  useEffect(() => {
+    console.log('IssueSummaryPanel - Issues:', issues)
+    console.log('IssueSummaryPanel - IssueDetails:', issueDetails)
+    console.log('IssueSummaryPanel - onIssueClick:', typeof onIssueClick)
+  }, [issues, issueDetails, onIssueClick])
 
   const getOverallStatus = () => {
     if (critical > 0) return {
@@ -159,12 +180,82 @@ export function IssueSummaryPanel({ summary, suggestions, issues = [] }: IssueSu
             <h4 className="text-md font-semibold text-gray-900">Issues Detected</h4>
           </div>
           <ul className="space-y-2">
-            {issues.map((issue, idx) => (
-              <li key={idx} className="flex items-start gap-3 text-sm text-gray-700 p-2 bg-yellow-50 rounded-lg border border-yellow-200">
-                <span className="text-yellow-600 font-bold mt-0.5">🟡</span>
-                <span className="flex-1">{issue}</span>
-              </li>
-            ))}
+            {issues.map((issue, idx) => {
+              // Try to find matching issue detail - match by message (exact or contains) or by code
+              const issueDetail = issueDetails.find(d => {
+                if (!d || !d.message) return false
+                // Normalize strings for comparison
+                const issueLower = issue.toLowerCase().trim()
+                const messageLower = (d.message || '').toLowerCase().trim()
+                const codeLower = (d.code || '').toLowerCase().trim()
+                
+                // Try exact match first
+                if (messageLower === issueLower || codeLower === issueLower) return true
+                
+                // Try substring match (message contains issue or vice versa)
+                if (messageLower.includes(issueLower) || issueLower.includes(messageLower)) return true
+                
+                // Try matching first few words
+                const issueWords = issueLower.split(/\s+/).slice(0, 3).join(' ')
+                const messageWords = messageLower.split(/\s+/).slice(0, 3).join(' ')
+                if (issueWords && messageWords && (messageWords.includes(issueWords) || issueWords.includes(messageWords))) return true
+                
+                return false
+              })
+              
+              const severity = issueDetail?.severity || 'medium'
+              const hasBlocks = issueDetail?.blocks && Array.isArray(issueDetail.blocks) && issueDetail.blocks.length > 0
+              const isClickable = hasBlocks && onIssueClick && issueDetail
+              
+              // Debug logging for first issue
+              if (idx === 0) {
+                console.log('IssueSummaryPanel - First issue:', issue)
+                console.log('IssueSummaryPanel - Found detail:', issueDetail)
+                console.log('IssueSummaryPanel - Has blocks:', hasBlocks)
+                console.log('IssueSummaryPanel - Is clickable:', isClickable)
+              }
+              
+              const getSeverityStyles = (sev: string) => {
+                switch (sev) {
+                  case 'critical': return { bg: 'bg-red-50', border: 'border-red-200', icon: '🔴', text: 'text-red-700' }
+                  case 'high': return { bg: 'bg-orange-50', border: 'border-orange-200', icon: '🟠', text: 'text-orange-700' }
+                  case 'medium': return { bg: 'bg-yellow-50', border: 'border-yellow-200', icon: '🟡', text: 'text-yellow-700' }
+                  case 'low': return { bg: 'bg-blue-50', border: 'border-blue-200', icon: '🔵', text: 'text-blue-700' }
+                  default: return { bg: 'bg-yellow-50', border: 'border-yellow-200', icon: '🟡', text: 'text-yellow-700' }
+                }
+              }
+              
+              const styles = getSeverityStyles(severity)
+              
+              return (
+                <li 
+                  key={idx} 
+                  className={`flex items-start gap-3 text-sm text-gray-700 p-3 rounded-lg border ${styles.bg} ${styles.border} ${
+                    isClickable ? 'cursor-pointer hover:shadow-md transition-shadow' : ''
+                  }`}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    if (isClickable && issueDetail && onIssueClick) {
+                      console.log('IssueSummaryPanel - Clicking issue:', issueDetail.code, issueDetail)
+                      onIssueClick(issueDetail.code)
+                    } else {
+                      console.log('IssueSummaryPanel - Issue not clickable:', { isClickable, hasIssueDetail: !!issueDetail, hasOnClick: !!onIssueClick })
+                    }
+                  }}
+                  title={isClickable ? 'Click to view on PDF' : undefined}
+                >
+                  <span className={`${styles.text} font-bold mt-0.5`}>{styles.icon}</span>
+                  <span className="flex-1">{issue}</span>
+                  {isClickable && (
+                    <span className="text-xs text-gray-500 flex items-center gap-1">
+                      <span>📍</span>
+                      <span>View</span>
+                    </span>
+                  )}
+                </li>
+              )
+            })}
           </ul>
         </div>
       )}

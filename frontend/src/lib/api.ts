@@ -40,6 +40,13 @@ export const resumeApi = {
   list: () => {
     return api.get('/api/resumes')
   },
+  
+  getDiagnostic: (resumeId: number, userPrompt: string) => {
+    return api.post('/api/llm-diagnostic', {
+      resume_id: resumeId,
+      user_prompt: userPrompt
+    })
+  },
 }
 
 export default api

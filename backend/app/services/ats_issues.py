@@ -44,6 +44,9 @@ class ATSIssue:
         section: Resume section affected (optional)
         block_indices: Indices into blocks list (optional, for reference)
         location_hint: Human-readable location description (optional)
+        blocks: List of block objects with page, bbox, and text_preview (for fix mode)
+        detected_reason: Reason why this issue was detected (e.g., "education_block_unmapped")
+        expected_section: Expected section name (e.g., "education", "experience")
     """
     code: str
     severity: IssueSeverity
@@ -54,6 +57,9 @@ class ATSIssue:
     section: Optional[IssueSection] = None
     block_indices: List[int] = field(default_factory=list)
     location_hint: str = ""
+    blocks: List[Dict[str, Any]] = field(default_factory=list)  # Block details for fix mode
+    detected_reason: str = ""  # Reason for detection (e.g., "education_block_unmapped")
+    expected_section: str = ""  # Expected section (e.g., "education", "experience")
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization"""
@@ -66,7 +72,10 @@ class ATSIssue:
             "page": self.page,
             "bbox": self.bbox,
             "block_count": len(self.block_indices),
-            "location_hint": self.location_hint
+            "location_hint": self.location_hint,
+            "blocks": self.blocks,  # Include block details for fix mode
+            "detected_reason": self.detected_reason,
+            "expected_section": self.expected_section
         }
     
     def to_highlight_dict(self) -> Dict[str, Any]:
@@ -77,7 +86,11 @@ class ATSIssue:
             "severity": self.severity.value if isinstance(self.severity, Enum) else self.severity,
             "issue_type": self.code,
             "message": self.message,
-            "tooltip": self.details
+            "tooltip": self.details,
+            "issue_id": self.code,  # For fix mode navigation
+            "blocks": self.blocks,  # Include blocks for fix mode
+            "detected_reason": self.detected_reason,
+            "expected_section": self.expected_section
         }
     
     def get_recommendation(self) -> Optional[str]:

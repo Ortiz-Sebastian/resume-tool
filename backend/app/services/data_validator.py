@@ -69,10 +69,12 @@ class DataValidator:
         non_degree_indicators = [
             'high school', 'gpa', 'grade point', 'dean', 'president', 'chairman',
             'member', 'participant', 'volunteer', 'intern', 'internship', 'honors',
-            'summa cum laude', 'magna cum laude', 'cum laude'
+            'summa cum laude', 'magna cum laude', 'cum laude', 'course', 'courses',
+            'class', 'classes', 'training', 'certification', 'certificate program'
         ]
         
         for idx, edu in enumerate(education):
+            print(f"Education entry {idx + 1}: {edu}")
             degree = (edu.get("degree") or "").strip()
             institution = (edu.get("institution") or edu.get("organization") or "").strip()
             combined = f"{degree} {institution}".lower()
@@ -90,9 +92,12 @@ class DataValidator:
             
             # Check if degree field looks like an actual degree
             if degree:
-                degree_lower = degree.lower()
+                degree_lower = degree.lower().strip()
                 has_degree_indicator = any(indicator in degree_lower for indicator in degree_indicators)
                 has_non_degree_indicator = any(indicator in combined for indicator in non_degree_indicators)
+                
+                # Check if it looks like a bullet point or list item (starts with -, *, •, etc.)
+                looks_like_bullet = degree.strip().startswith(('-', '*', '•', '·', '◦'))
                 
                 # Flag if it contains non-degree indicators but no degree indicators
                 if has_non_degree_indicator and not has_degree_indicator:
@@ -100,7 +105,25 @@ class DataValidator:
                         "entry_index": idx,
                         "entry": edu,
                         "severity": "high",
-                        "message": f'Education entry {idx + 1}: "{degree}" doesn\'t appear to be a degree. May be misclassified content (e.g., GPA, honors, etc.).',
+                        "message": f'Education entry {idx + 1}: "{degree}" doesn\'t appear to be a degree. May be misclassified content (e.g., course, training, etc.).',
+                        "field": "degree"
+                    })
+                # Flag if it looks like a bullet point (likely a course or list item, not a degree)
+                elif looks_like_bullet and not has_degree_indicator:
+                    issues.append({
+                        "entry_index": idx,
+                        "entry": edu,
+                        "severity": "high",
+                        "message": f'Education entry {idx + 1}: "{degree}" appears to be a course or list item (starts with bullet), not a degree.',
+                        "field": "degree"
+                    })
+                # Flag if no degree indicators and no institution (likely incomplete or misclassified)
+                elif not has_degree_indicator and not institution:
+                    issues.append({
+                        "entry_index": idx,
+                        "entry": edu,
+                        "severity": "medium",
+                        "message": f'Education entry {idx + 1}: "{degree}" doesn\'t appear to be a valid degree (no degree keywords found and no institution).',
                         "field": "degree"
                     })
                 # Flag if very short degree name without institution

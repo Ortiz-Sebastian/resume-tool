@@ -126,9 +126,24 @@ Be concise. Focus on the most relevant issue(s) that match the user's observatio
         detected_issues: List[Dict[str, Any]],
         block_summaries: List[Dict[str, Any]]
     ) -> str:
-        """Build the user message with structured issues from rule-based detection"""
+        """Build the user message with structured issues from rule-based detection (block-aware)"""
         
         import json
+        
+        # Enhance detected_issues with block context for block-aware explanations
+        enhanced_issues = []
+        for issue in detected_issues:
+            enhanced_issue = issue.copy()
+            # Include block information if available
+            if issue.get("blocks"):
+                enhanced_issue["block_context"] = []
+                for block in issue.get("blocks", [])[:3]:  # Limit to first 3 blocks
+                    enhanced_issue["block_context"].append({
+                        "page": block.get("page"),
+                        "text_preview": block.get("text_preview", "")[:100],  # First 100 chars
+                        "bbox": block.get("bbox")
+                    })
+            enhanced_issues.append(enhanced_issue)
         
         # Build structured data payload
         data_payload = {
@@ -166,12 +181,12 @@ Be concise. Focus on the most relevant issue(s) that match the user's observatio
                 }
             },
             
-            "detected_issues": detected_issues,  # Structured ATSIssue objects (rule-based)
+            "detected_issues": enhanced_issues,  # Enhanced with block context
             
             "block_summaries": block_summaries  # Condensed block info for context
         }
         
-        # Format as clean JSON string
+        # Format as clean JSON string with block-aware instructions
         message = f"""User's observation: "{user_prompt}"
 
 Here is the structured data about this resume:
@@ -188,14 +203,25 @@ Each issue has:
 - message: short summary
 - details: explanation
 - location_hint: where to look
+- blocks: specific text blocks that caused the issue (for block-aware explanations)
+- detected_reason: why this was detected (e.g., "education_block_unmapped")
+- expected_section: expected section name (e.g., "education", "experience")
+
+BLOCK-AWARE EXPLANATION MODE:
+When an issue has "blocks" data, explain WHY that specific text block was not classified correctly.
+For example:
+- If "education_block_unmapped" with block text "The University of Texas at San Antonio":
+  Explain why this text block was not classified as EDUCATION by the ATS.
+  Consider: missing section header, no degree keyword nearby, formatting issues, etc.
 
 Your job is to:
 1. Identify which detected issue(s) relate to the user's observation
-2. Explain WHY this happened in simple terms (connect the dots)
-3. Point to WHERE on the resume (use location_hint)
-4. Suggest HOW to fix (specific actionable steps)
+2. If issue has block context, explain WHY that specific block failed (block-aware explanation)
+3. If no block context, explain WHY this happened in general terms
+4. Point to WHERE on the resume (use location_hint and block page/bbox if available)
+5. Suggest HOW to fix (specific actionable steps referencing the actual block text if available)
 
-Be concise. Focus on the most relevant issue(s)."""
+Be concise. Focus on the most relevant issue(s). Use block context when available for precise explanations."""
         
         return message
     

@@ -133,6 +133,8 @@ class ATSIssueDetector:
         
         # Images issue
         if ats_diagnostics.get("has_images"):
+            # Try to find first block for reference
+            first_block = blocks[0] if blocks else None
             issues.append(ATSIssue(
                 code="has_images",
                 severity=IssueSeverity.HIGH,
@@ -140,11 +142,20 @@ class ATSIssueDetector:
                 message="Resume contains images that ATS systems cannot read",
                 details="Images, logos, and graphics are invisible to ATS. Replace with text-only formatting.",
                 page=1,
-                bbox=None  # Document-wide
+                bbox=first_block.get("bbox") if first_block else None,
+                blocks=[{
+                    "page": 1,
+                    "bbox": first_block.get("bbox", []) if first_block else [],
+                    "text_preview": first_block.get("text", "")[:80] if first_block else ""
+                }] if first_block else [],
+                detected_reason="images_detected",
+                expected_section=""
             ))
         
         # Tables issue
         if ats_diagnostics.get("has_tables"):
+            # Try to find first block for reference
+            first_block = blocks[0] if blocks else None
             issues.append(ATSIssue(
                 code="has_tables",
                 severity=IssueSeverity.MEDIUM,
@@ -152,7 +163,14 @@ class ATSIssueDetector:
                 message="Resume contains tables - ATS may misread content order",
                 details="Tables can cause content to be read in wrong order. Use simple text formatting instead.",
                 page=1,
-                bbox=None  # Document-wide
+                bbox=first_block.get("bbox") if first_block else None,
+                blocks=[{
+                    "page": 1,
+                    "bbox": first_block.get("bbox", []) if first_block else [],
+                    "text_preview": first_block.get("text", "")[:80] if first_block else ""
+                }] if first_block else [],
+                detected_reason="tables_detected",
+                expected_section=""
             ))
         
         # Multi-column layout issue
@@ -195,6 +213,15 @@ class ATSIssueDetector:
                     # Count how many blocks are in secondary columns on this page
                     secondary_count = len(page_blocks)
                     
+                    # Collect block information for fix mode (limit to first 5 blocks per page)
+                    issue_blocks = []
+                    for block in page_blocks[:5]:
+                        issue_blocks.append({
+                            "page": block.get("page", page_num),
+                            "bbox": block.get("bbox", []),
+                            "text_preview": block.get("text", "")[:80]
+                        })
+                    
                     issues.append(ATSIssue(
                         code="multi_column_layout",
                         severity=severity,
@@ -203,10 +230,20 @@ class ATSIssueDetector:
                         details=details + f" Found {secondary_count} block(s) in secondary column(s) on this page.",
                         page=page_num,
                         bbox=bbox,  # Highlight secondary column content
-                        location_hint=f"Secondary column content on page {page_num}"
+                        location_hint=f"Secondary column content on page {page_num}",
+                        blocks=issue_blocks,
+                        detected_reason="multi_column_detected",
+                        expected_section=""
                     ))
             else:
                 # Fallback: document-wide issue if no blocks found
+                # Still try to find any block on page 1 for reference
+                first_page_block = None
+                if blocks:
+                    first_page_blocks = [b for b in blocks if b.get("page", 1) == 1]
+                    if first_page_blocks:
+                        first_page_block = first_page_blocks[0]
+                
                 issues.append(ATSIssue(
                     code="multi_column_layout",
                     severity=severity,
@@ -214,7 +251,15 @@ class ATSIssueDetector:
                     message="Multi-column layout detected",
                     details=details,
                     page=1,
-                    bbox=None  # Document-wide (no highlight)
+                    bbox=first_page_block.get("bbox") if first_page_block else None,
+                    location_hint="Document-wide layout issue",
+                    blocks=[{
+                        "page": 1,
+                        "bbox": first_page_block.get("bbox", []) if first_page_block else [],
+                        "text_preview": first_page_block.get("text", "")[:80] if first_page_block else ""
+                    }] if first_page_block else [],
+                    detected_reason="multi_column_detected",
+                    expected_section=""
                 ))
         
         # Headers/footers issue (only flagged when truly detected)
@@ -236,6 +281,13 @@ class ATSIssueDetector:
             factors = complexity_metric.get("contributing_factors", [])
             factors_str = "; ".join(factors) if factors else "Multiple formatting issues detected"
             
+            # Find representative block for highlighting
+            representative_block = None
+            if blocks:
+                first_page_blocks = [b for b in blocks if b.get("page", 1) == 1]
+                if first_page_blocks:
+                    representative_block = first_page_blocks[0]
+            
             if score > 70:
                 # Very complex - CRITICAL
                 issues.append(ATSIssue(
@@ -245,7 +297,14 @@ class ATSIssueDetector:
                     message="Resume has very complex layout",
                     details=f"Your resume will likely fail ATS parsing. Issues found: {factors_str}. Recommendation: Simplify to single-column layout with minimal formatting, use only 1-2 standard fonts, and remove tables/images.",
                     page=1,
-                    bbox=None
+                    bbox=representative_block.get("bbox") if representative_block else None,
+                    blocks=[{
+                        "page": 1,
+                        "bbox": representative_block.get("bbox", []) if representative_block else [],
+                        "text_preview": representative_block.get("text", "")[:80] if representative_block else ""
+                    }] if representative_block else [],
+                    detected_reason="very_complex_layout_detected",
+                    expected_section=""
                 ))
             elif score > 40:
                 # Complex - HIGH
@@ -256,10 +315,25 @@ class ATSIssueDetector:
                     message="Resume has complex layout",
                     details=f"Your resume may have ATS parsing issues. Contributing factors: {factors_str}. Recommendation: Simplify formatting and reduce use of tables, images, and multiple fonts.",
                     page=1,
-                    bbox=None
+                    bbox=representative_block.get("bbox") if representative_block else None,
+                    blocks=[{
+                        "page": 1,
+                        "bbox": representative_block.get("bbox", []) if representative_block else [],
+                        "text_preview": representative_block.get("text", "")[:80] if representative_block else ""
+                    }] if representative_block else [],
+                    detected_reason="complex_layout_detected",
+                    expected_section=""
                 ))
             elif score > 20:
                 # Moderate - MEDIUM
+                # Try to find a representative block for highlighting
+                representative_block = None
+                if blocks:
+                    # Use first block from first page
+                    first_page_blocks = [b for b in blocks if b.get("page", 1) == 1]
+                    if first_page_blocks:
+                        representative_block = first_page_blocks[0]
+                
                 issues.append(ATSIssue(
                     code="moderate_complexity",
                     severity=IssueSeverity.MEDIUM,
@@ -267,7 +341,14 @@ class ATSIssueDetector:
                     message="Resume has moderate layout complexity",
                     details=f"Your resume is generally ATS-friendly but could be improved. {factors_str}. Consider simplifying to maximize ATS compatibility.",
                     page=1,
-                    bbox=None
+                    bbox=representative_block.get("bbox") if representative_block else None,
+                    blocks=[{
+                        "page": 1,
+                        "bbox": representative_block.get("bbox", []) if representative_block else [],
+                        "text_preview": representative_block.get("text", "")[:80] if representative_block else ""
+                    }] if representative_block else [],
+                    detected_reason="layout_complexity_detected",
+                    expected_section=""
                 ))
         
         return issues
@@ -641,8 +722,24 @@ class ATSIssueDetector:
                 location_hint=f"Experience section on page {first_block.get('page', 1)}"
             ))
         else:
-            # Check for jobs without bullets
-            jobs_without_bullets = sum(1 for job in experience if not job.get("bullets") or len(job.get("bullets", [])) == 0)
+            # Check for jobs without bullets/descriptions
+            # Note: Affinda parser uses "highlights" field, not "bullets"
+            # Also check "description" field which may contain bullet points as text
+            def has_bullets_or_description(job):
+                highlights = job.get("highlights") or job.get("bullets")  # Support both field names
+                description = job.get("description", "")
+                
+                # Check if highlights/bullets exist and have content
+                if highlights and isinstance(highlights, list) and len(highlights) > 0:
+                    return True
+                
+                # Check if description exists and has meaningful content (not just whitespace)
+                if description and isinstance(description, str) and len(description.strip()) > 20:
+                    return True
+                
+                return False
+            
+            jobs_without_bullets = sum(1 for job in experience if not has_bullets_or_description(job))
             if jobs_without_bullets > 0:
                 issues.append(ATSIssue(
                     code="experience_no_bullets",
@@ -693,6 +790,15 @@ class ATSIssueDetector:
         # No education extracted
         if len(education) == 0:
             formatting_issues = self._diagnose_section_formatting(section_blocks)
+            # Collect block information for fix mode
+            issue_blocks = []
+            for _, block in section_blocks[:5]:  # Limit to first 5 blocks
+                issue_blocks.append({
+                    "page": block.get("page", 1),
+                    "bbox": block.get("bbox", []),
+                    "text_preview": block.get("text", "")[:80]
+                })
+            
             issues.append(ATSIssue(
                 code="education_not_extracted",
                 severity=IssueSeverity.HIGH,
@@ -701,7 +807,10 @@ class ATSIssueDetector:
                 details=f"ATS extracted 0 education entries. {f'Detected formatting issues: {chr(10).join(formatting_issues)}' if formatting_issues else 'Likely causes: Education in table format, non-standard degree names, or missing university name'}. Fix: Use clear format: Degree Name, University Name, Graduation Date.",
                 page=first_block.get("page", 1),
                 bbox=first_block["bbox"],
-                location_hint=f"Education section on page {first_block.get('page', 1)}"
+                location_hint=f"Education section on page {first_block.get('page', 1)}",
+                blocks=issue_blocks,
+                detected_reason="education_block_unmapped",
+                expected_section="education"
             ))
         else:
             # Check for incomplete entries
@@ -990,6 +1099,16 @@ class ATSIssueDetector:
             if len(text_original) > 60:
                 preview += "..."
             
+            # Determine expected section based on content analysis
+            expected_section = ""
+            text_lower_for_section = text_lower[:100]  # Check first 100 chars
+            if any(word in text_lower_for_section for word in ["university", "college", "degree", "bachelor", "master", "phd", "education"]):
+                expected_section = "education"
+            elif any(word in text_lower_for_section for word in ["engineer", "developer", "manager", "company", "worked", "experience", "job"]):
+                expected_section = "experience"
+            elif any(word in text_lower_for_section for word in ["skill", "proficient", "expert", "knowledge"]):
+                expected_section = "skills"
+            
             unmapped_count += 1
             issues.append(self._create_issue(
                 code="unmapped_content",
@@ -997,7 +1116,9 @@ class ATSIssueDetector:
                 section=IssueSection.GENERAL,
                 message=f"Unmapped content: \"{preview}\"",
                 details="This content doesn't clearly map to standard resume sections (experience, education, skills). ATS systems may skip or misclassify it. Ensure important information is in clearly labeled sections.",
-                block=block
+                block=block,
+                detected_reason="content_block_unmapped",
+                expected_section=expected_section
             ))
         
         return issues
@@ -1248,9 +1369,20 @@ class ATSIssueDetector:
         section: IssueSection,
         message: str,
         details: str,
-        block: Dict[str, Any]
+        block: Dict[str, Any],
+        detected_reason: str = "",
+        expected_section: str = "",
+        blocks: List[Dict[str, Any]] = None
     ) -> ATSIssue:
-        """Helper to create an ATSIssue from a block"""
+        """Helper to create an ATSIssue from a block with fix mode support"""
+        # If blocks not provided, create from single block
+        if blocks is None:
+            blocks = [{
+                "page": block.get("page", 1),
+                "bbox": block.get("bbox", []),
+                "text_preview": block.get("text", "")[:80]  # First 80 chars
+            }]
+        
         return ATSIssue(
             code=code,
             severity=severity,
@@ -1258,8 +1390,11 @@ class ATSIssueDetector:
             message=message,
             details=details,
             page=block.get("page", 1),
-            bbox=block["bbox"],
-            location_hint=f"Page {block.get('page', 1)}, {block.get('region', 'body')} region"
+            bbox=block.get("bbox"),
+            location_hint=f"Page {block.get('page', 1)}, {block.get('region', 'body')} region",
+            blocks=blocks,
+            detected_reason=detected_reason,
+            expected_section=expected_section
         )
     
     def _clean_font_name(self, raw_font_name: str) -> str:
@@ -1419,14 +1554,18 @@ class ATSIssueDetector:
         return cleaned
     
     def _issue_to_highlight(self, issue: ATSIssue) -> Dict[str, Any]:
-        """Convert ATSIssue to legacy highlight format"""
+        """Convert ATSIssue to highlight format (includes fix mode fields)"""
         return {
             "page": issue.page,
             "bbox": issue.bbox,
             "severity": issue.severity.value if hasattr(issue.severity, 'value') else issue.severity,
             "issue_type": issue.code,
             "message": issue.message,
-            "tooltip": issue.details
+            "tooltip": issue.details,
+            "issue_id": issue.code,  # For fix mode navigation
+            "blocks": issue.blocks,  # Block details for fix mode
+            "detected_reason": issue.detected_reason,
+            "expected_section": issue.expected_section
         }
     
     def _issues_to_recommendations(self, issues: List[ATSIssue]) -> List[str]:
